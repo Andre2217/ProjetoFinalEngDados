@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    container_name: hacker-news-trends-app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+  pipeline:
+    build: .
+    env_file:
+      - .env
+    command: python -m src.orchestration.pipeline_flow
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    profiles:
+      - pipeline
