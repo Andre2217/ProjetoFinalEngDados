@@ -1,22 +1,35 @@
 services:
-  app:
+  airflow:
     build: .
-    container_name: hacker-news-trends-app
+    container_name: hacker-news-airflow
+    command: airflow standalone
     ports:
-      - "8501:8501"
-    env_file:
-      - .env
+      - "8080:8080"
+    environment:
+      AIRFLOW_HOME: /opt/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow/project
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/project/src
+      - ./data:/opt/airflow/project/data
+      - airflow_home:/opt/airflow
+    restart: unless-stopped
 
-  pipeline:
-    build: .
-    env_file:
-      - .env
-    command: python -m src.orchestration.pipeline_flow
+  minio:
+    image: minio/minio:latest
+    container_name: hacker-news-minio
+    profiles: ["minio"]
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    profiles:
-      - pipeline
+      - minio_data:/data
+
+volumes:
+  airflow_home:
+  minio_data:

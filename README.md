@@ -1,160 +1,115 @@
 # Hacker News Trends
 
-Pipeline de Engenharia de Dados para monitoramento e detecção de tendências tecnológicas a partir da API pública do Hacker News.
+Base inicial do projeto da disciplina de Projetos da pós-graduação em Engenharia de Dados da UNIFOR.
 
-## Status atual
+## Objetivo desta versão
 
-Nesta primeira etapa estão implementados:
+Esta versão implementa somente a primeira etapa real do pipeline:
 
-- ingestão de `topstories` e detalhes de cada item;
-- Bronze em NDJSON, preservando o payload original;
-- particionamento da Bronze por ano/mês/dia;
-- validação da Silver com Pandera;
-- quarentena para registros rejeitados;
-- Silver persistida em DuckDB;
-- orquestração básica com Prefect e retries na coleta;
-- testes básicos com pytest;
-- Streamlit apenas para inspeção da etapa atual;
-- Docker e Docker Compose;
-- workflow básico de testes no GitHub Actions.
+**Hacker News API → Landing**
 
-A camada Gold e o dashboard analítico final ainda não fazem parte desta versão.
+A Landing recebe o conteúdo da API sem limpeza, tipagem ou regra de negócio. O objetivo é preservar o dado coletado para que as próximas camadas possam ser reprocessadas sem consultar novamente a fonte.
 
-## Arquitetura atual
+## Arquitetura planejada
 
-```mermaid
-flowchart LR
-    A[Hacker News API] --> B[Python + Requests]
-    B --> C[Bronze NDJSON]
-    C --> D[Pandera]
-    D -->|válidos| E[Silver DuckDB]
-    D -->|rejeitados| F[Quarantine NDJSON]
-    G[Prefect] --> B
-    G --> C
-    G --> D
-    H[Streamlit - inspeção] --> E
+```text
+Hacker News API
+      ↓
+   Landing
+      ↓
+Great Expectations
+      ↓
+   Bronze
+      ↓
+   Silver
+      ↓
+    Gold
+      ↓
+ Dashboard
 ```
+
+O armazenamento definitivo ainda será decidido pela equipe. A estrutura permite evoluir para DuckDB, MinIO ou uma combinação dos dois sem alterar a lógica da fonte.
+
+## Tecnologias planejadas
+
+- Python + Requests: ingestão da API
+- Apache Airflow: orquestração e agendamento
+- Great Expectations: qualidade e validação de dados
+- DuckDB: opção para dados estruturados e consultas analíticas
+- MinIO: opção para armazenamento de objetos/arquivos
+- Pandas: transformações simples
+- Streamlit: consumo final
+- Docker Compose: ambiente reproduzível
+- Git/GitHub: versionamento
 
 ## Estrutura
 
 ```text
 .
-├── app.py
+├── dags/
+│   └── hacker_news_landing.py
 ├── src/
-│   ├── ingestion/
+│   └── landing.py
+├── data/
+│   ├── landing/
 │   ├── bronze/
 │   ├── silver/
-│   ├── quality/
-│   ├── orchestration/
-│   └── config.py
-├── tests/
-├── data/
-│   ├── bronze/
-│   └── quarantine/
-├── logs/
+│   └── gold/
 ├── docs/
+├── tests/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-└── .env.example
+├── .env.example
+└── README.md
 ```
 
-## Execução local
+## Executar
 
-```bash
-python -m venv .venv
-```
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Instale as dependências:
-
-```bash
-pip install -r requirements.txt
-```
-
-Crie o arquivo de ambiente:
-
-Linux/macOS:
+Crie o `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Execute a pipeline uma vez:
-
-```bash
-python -m src.orchestration.pipeline_flow
-```
-
-Execute a interface de inspeção:
-
-```bash
-streamlit run app.py
-```
-
-## Docker
-
-Crie `.env` a partir de `.env.example` e execute:
+Suba o Airflow:
 
 ```bash
 docker compose up --build
 ```
 
-Acesse o Streamlit em `http://localhost:8501`.
+Acesse:
 
-Para executar apenas uma coleta em um container:
+```text
+http://localhost:8080
+```
+
+O DAG `hacker_news_landing` está configurado para executar a cada 30 minutos.
+
+A senha gerada pelo modo standalone do Airflow fica dentro do volume do Airflow. Para visualizá-la:
 
 ```bash
-docker compose --profile pipeline run --rm pipeline
+docker compose exec airflow cat /opt/airflow/simple_auth_manager_passwords.json.generated
 ```
 
-## Testes
+Os snapshots serão gravados em:
+
+```text
+data/landing/AAAA/MM/DD/
+```
+
+## MinIO
+
+O MinIO está preparado, mas não é obrigatório nesta etapa. Para iniciá-lo junto com o Airflow:
 
 ```bash
-pytest -q
+docker compose --profile minio up --build
 ```
 
-## Dados
-
-A Bronze é armazenada em:
+Console do MinIO:
 
 ```text
-data/bronze/hacker_news/year=YYYY/month=MM/day=DD/
+http://localhost:9001
 ```
 
-A Silver é persistida no arquivo:
-
-```text
-data/hacker_news.duckdb
-```
-
-Tabela atual:
-
-```text
-silver.story_snapshots
-```
-
-A chave lógica é:
-
-```text
-snapshot_id + story_id + list_type
-```
-
-Isso permite reprocessar o mesmo arquivo Bronze sem duplicar a mesma observação na Silver.
+Nesta versão a Landing ainda grava localmente. A decisão de usar MinIO, DuckDB ou ambos será tomada antes da implementação das próximas camadas.
