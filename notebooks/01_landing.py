@@ -1,38 +1,61 @@
+# Databricks notebook source
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
 
+
 BASE_URL = "https://hacker-news.firebaseio.com/v0"
-LANDING_DIR = Path("/opt/airflow/project/data/landing")
+
+LANDING_DIR = Path(
+    "/Volumes/hackernews/hacker_news/data/landing"
+)
 
 
 def collect_hacker_news_landing(story_limit: int = 30) -> str:
     collected_at = datetime.now(timezone.utc)
 
-    topstories_response = requests.get(
+    response = requests.get(
         f"{BASE_URL}/topstories.json",
         timeout=30,
     )
-    topstories_response.raise_for_status()
 
-    story_ids = topstories_response.json()[:story_limit]
+    response.raise_for_status()
 
-    output_dir = LANDING_DIR / collected_at.strftime("%Y/%m/%d")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    story_ids = response.json()[:story_limit]
+
+    output_dir = (
+        LANDING_DIR
+        / collected_at.strftime("%Y")
+        / collected_at.strftime("%m")
+        / collected_at.strftime("%d")
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     output_path = (
         output_dir
         / f"hacker_news_{collected_at.strftime('%H%M%S')}.ndjson"
     )
 
-    with output_path.open("w", encoding="utf-8") as file:
-        for rank, story_id in enumerate(story_ids, start=1):
+    with output_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        for rank, story_id in enumerate(
+            story_ids,
+            start=1,
+        ):
             item_response = requests.get(
                 f"{BASE_URL}/item/{story_id}.json",
                 timeout=30,
             )
+
             item_response.raise_for_status()
 
             record = {
@@ -45,7 +68,18 @@ def collect_hacker_news_landing(story_limit: int = 30) -> str:
             }
 
             file.write(
-                json.dumps(record, ensure_ascii=False) + "\n"
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                )
+                + "\n"
             )
 
     return str(output_path)
+
+
+output_path = collect_hacker_news_landing(
+    story_limit=30
+)
+
+print(output_path)
