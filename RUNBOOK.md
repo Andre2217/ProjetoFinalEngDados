@@ -31,6 +31,7 @@ notebooks/
 - 01_landing.py
 - 02_landing_to_bronze.py
 - 03_quality_report.sql
+- 04_bronze_to_silver.py
 
 requirements.txt
 
@@ -220,6 +221,94 @@ Essa tabela contém registros que não passaram nas regras de qualidade.
 Ela também contém informações que permitem identificar o motivo da rejeição.
 
 A existência da tabela de quarentena garante que registros problemáticos não sejam descartados silenciosamente.
+
+### 8.1. Adicionar a Silver ao ETL Pipeline
+
+A Silver não exige a criação de nenhum objeto novo no workspace.
+
+O arquivo `notebooks/04_bronze_to_silver.py` é adicionado ao **mesmo** ETL Pipeline criado no passo 4 (`Hacker News - Landing to Bronze`).
+
+Isso é necessário porque o código lê a tabela `bronze_stories` pelo nome curto, o que só funciona dentro do mesmo pipeline. O Lakeflow identifica sozinho a dependência Bronze → Silver.
+
+Pré-requisito: os passos 1 a 8 já executados, com dados na `bronze_stories`.
+
+Passo a passo:
+
+1. Atualize o Git Folder com `Pull` e confirme que o arquivo `notebooks/04_bronze_to_silver.py` está disponível.
+2. Abra o ETL Pipeline `Hacker News - Landing to Bronze`.
+3. No painel de arquivos à esquerda, selecione a aba `All files`.
+4. Navegue até `notebooks/04_bronze_to_silver.py`.
+5. Nos três pontinhos do arquivo, selecione `Include in pipeline`.
+6. Confirme que o arquivo aparece na aba `Pipeline`, junto com o `02_landing_to_bronze.py`.
+
+Não é necessário criar a tabela manualmente. Na primeira execução, o pipeline cria a `silver_story_snapshots` em `hackernews.hacker_news`.
+
+### 8.2. Executar e validar a Silver
+
+Execute:
+
+Dry run
+
+No `Pipeline graph`, deve aparecer o fluxo:
+
+```
+landing_prepared → landing_validated → bronze_stories → silver_story_snapshots
+                                     → quarantine_stories
+```
+
+Se não houver erros, execute:
+
+Run pipeline
+
+Na primeira execução, a Silver processa todos os registros já existentes na Bronze. Nas execuções seguintes, apenas os registros novos.
+
+Ao final, deve existir no Catalog Explorer:
+
+```
+hackernews.hacker_news.silver_story_snapshots
+```
+
+Validações no SQL Editor:
+
+Quantidade de linhas da Silver deve ser igual à da Bronze:
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM hackernews.hacker_news.bronze_stories) AS bronze,
+  (SELECT COUNT(*) FROM hackernews.hacker_news.silver_story_snapshots) AS silver;
+```
+
+Não deve haver duplicidade de notícia no mesmo snapshot (resultado esperado: nenhuma linha):
+
+```sql
+SELECT story_id, collected_at, COUNT(*) AS qtd
+FROM hackernews.hacker_news.silver_story_snapshots
+GROUP BY story_id, collected_at
+HAVING COUNT(*) > 1;
+```
+
+Quantidade de snapshots e de notícias distintas:
+
+```sql
+SELECT
+  COUNT(DISTINCT collected_at) AS snapshots,
+  COUNT(DISTINCT story_id) AS noticias,
+  COUNT(*) AS linhas
+FROM hackernews.hacker_news.silver_story_snapshots;
+```
+
+Granularidade da tabela: uma linha por notícia em cada snapshot (chave lógica: `story_id` + `collected_at`).
+
+Para popular a Silver com novos dados manualmente:
+
+1. Execute `notebooks/01_landing.py` (gera um novo snapshot na Landing).
+2. Execute o ETL Pipeline com `Run pipeline` (processa Landing → Bronze → Silver).
+
+Recomenda-se gerar alguns snapshots com alguns minutos de intervalo, para que a mesma notícia apareça em coletas diferentes e seja possível observar a evolução de rank, score e comentários.
+
+Observação sobre o Job: nenhuma alteração é necessária. A task `landing_to_bronze` executa o ETL Pipeline inteiro, portanto também passa a atualizar a Silver.
+
+Observação sobre o Git Folder: o pipeline executa o código da branch ativa no Git Folder. Confirme a branch antes de executar.
 
 ### 9. Criar views do relatório de qualidade
 
@@ -501,6 +590,8 @@ Configurar Catalog hackernews e Schema hacker_news.
 Publicar pipeline_event_log.
 Fazer Dry Run.
 Executar o ETL Pipeline.
+Incluir 04_bronze_to_silver.py no mesmo ETL Pipeline.
+Executar o ETL Pipeline novamente e validar silver_story_snapshots.
 Executar 03_quality_report.sql uma única vez.
 Criar o Lakeflow Job.
 Configurar a task landing.

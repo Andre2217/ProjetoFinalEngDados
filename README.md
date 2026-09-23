@@ -69,6 +69,8 @@ Expectations do Lakeflow
 ↓  
 Bronze / Quarentena  
 ↓  
+Silver (snapshots limpos e tipados)  
+↓  
 Event Log de qualidade
 
 ---
@@ -175,7 +177,56 @@ Isso permitirá observar, por exemplo:
 - posição no ranking em cada coleta;
 - número de comentários em cada coleta.
 
-A implementação da Silver será realizada nas próximas etapas do projeto.
+A Silver é implementada no arquivo `notebooks/04_bronze_to_silver.py`, dentro do mesmo Lakeflow ETL Pipeline da Bronze.
+
+A leitura da Bronze é feita em streaming, portanto o processamento também é incremental: a cada execução, somente os registros novos da Bronze são processados.
+
+A Silver é persistida como tabela Delta:
+
+`hackernews.hacker_news.silver_story_snapshots`
+
+Granularidade: uma linha por notícia em cada snapshot (chave lógica: `story_id` + `collected_at`).
+
+As transformações são aplicadas de forma genérica, orientadas por configuração, na seguinte ordem:
+
+1. **Seleção de colunas:** apenas as colunas necessárias para as análises são mantidas.
+2. **Remoção de espaços:** `trim` no início e no fim das colunas `title`, `author`, `url`, `domain` e `source_file`. Valores que ficam vazios após o trim são convertidos para nulo.
+3. **Tipagem explícita:** cada coluna recebe o tipo definido para a camada.
+4. **Deduplicação:** registros com o mesmo `record_key` são descartados, protegendo a tabela contra o reprocessamento de um mesmo arquivo.
+5. **Auditoria:** inclusão da coluna `silver_loaded_at`.
+
+Campos como `source`, `list_type` e `item_type` são constantes validadas na Bronze e, por isso, não são propagados para a Silver. O campo `text` também não é propagado.
+
+Colunas e tipos:
+
+| Coluna | Tipo |
+|---|---|
+| record_key | string |
+| collected_at | timestamp |
+| rank | int |
+| story_id | string |
+| title | string |
+| author | string |
+| url | string |
+| domain | string |
+| score | int |
+| comments | int |
+| published_at | timestamp |
+| source_file | string |
+| source_file_modified_at | timestamp |
+| bronze_loaded_at | timestamp |
+| silver_loaded_at | timestamp |
+
+#### Qualidade na Silver
+
+Após a tipagem, a Silver aplica Expectations do tipo `expect_all_or_drop`. Como uma conversão de tipo que falha resulta em valor nulo, essas regras descartam registros inconsistentes e registram as métricas no Event Log:
+
+- `record_key` obrigatório;
+- `story_id` obrigatório;
+- `collected_at` obrigatório;
+- `rank` obrigatório;
+- `title` obrigatório;
+- `published_at` obrigatório.
 
 ---
 
@@ -223,6 +274,8 @@ Registros aprovados seguem para a Bronze.
 
 Registros reprovados seguem para a Quarentena.
 
+Na camada Silver, novas Expectations validam o resultado da tipagem (ver seção **Qualidade na Silver**).
+
 ---
 
 ## Monitoramento e auditoria
@@ -264,8 +317,10 @@ Task 1 — Landing
 
 ↓  
 
-Task 2 — Landing para Bronze  
-Lakeflow ETL Pipeline utilizando `02_landing_to_bronze.py`
+Task 2 — Landing para Bronze e Silver  
+Lakeflow ETL Pipeline utilizando `02_landing_to_bronze.py` e `04_bronze_to_silver.py`
+
+Como a Silver faz parte do mesmo ETL Pipeline, o próprio Lakeflow resolve a dependência Bronze → Silver, sem necessidade de uma task adicional no Job.
 
 Futuramente serão adicionadas tarefas para:
 
@@ -338,7 +393,7 @@ Permite processar somente novos arquivos sem reler todo o histórico a cada exec
 
 ### Lakeflow Declarative Pipelines
 
-Responsável pelo fluxo Landing → Bronze.
+Responsável pelo fluxo Landing → Bronze → Silver.
 
 Utiliza:
 
@@ -393,6 +448,7 @@ notebooks/
 - 01_landing.py
 - 02_landing_to_bronze.py
 - 03_quality_report.sql
+- 04_bronze_to_silver.py
 
 docs/
 - architecture.md
@@ -419,3 +475,4 @@ Atualmente:
 requests==2.32.5
 pytest==8.4.2
 streamlit==1.49.1
+```
