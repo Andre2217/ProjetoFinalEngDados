@@ -32,6 +32,7 @@ notebooks/
 - 02_landing_to_bronze.py
 - 03_quality_report.sql
 - 04_bronze_to_silver.py
+- 05_silver_to_gold.py
 
 requirements.txt
 
@@ -309,6 +310,108 @@ Recomenda-se gerar alguns snapshots com alguns minutos de intervalo, para que a 
 Observação sobre o Job: nenhuma alteração é necessária. A task `landing_to_bronze` executa o ETL Pipeline inteiro, portanto também passa a atualizar a Silver.
 
 Observação sobre o Git Folder: o pipeline executa o código da branch ativa no Git Folder. Confirme a branch antes de executar.
+
+### 8.3. Adicionar a Gold ao ETL Pipeline
+
+Assim como a Silver, a Gold não exige a criação de nenhum objeto novo no workspace.
+
+O arquivo `notebooks/05_silver_to_gold.py` é adicionado ao **mesmo** ETL Pipeline (`Hacker News - Landing to Bronze`), pois lê a tabela `silver_story_snapshots` pelo nome curto.
+
+Pré-requisito: os passos 8.1 e 8.2 já executados, com dados na `silver_story_snapshots`.
+
+Passo a passo:
+
+1. Atualize o Git Folder com `Pull` e confirme que o arquivo `notebooks/05_silver_to_gold.py` está disponível.
+2. Abra o ETL Pipeline `Hacker News - Landing to Bronze`.
+3. No painel de arquivos à esquerda, selecione a aba `All files`.
+4. Navegue até `notebooks/05_silver_to_gold.py`.
+5. Nos três pontinhos do arquivo, selecione `Include in pipeline`.
+6. Confirme que o arquivo aparece na aba `Pipeline`, junto com o `02_landing_to_bronze.py` e o `04_bronze_to_silver.py`.
+
+Não é necessário criar as tabelas manualmente. Na primeira execução, o pipeline cria as quatro tabelas da Gold em `hackernews.hacker_news`.
+
+### 8.4. Executar e validar a Gold
+
+Execute:
+
+Dry run
+
+No `Pipeline graph`, deve aparecer o fluxo:
+
+```
+silver_story_snapshots → gold_story_timeline → gold_story_summary → gold_domain_stats
+                                             → gold_trend_index
+```
+
+Se não houver erros, execute:
+
+Run pipeline
+
+As tabelas da Gold são materialized views. A cada execução, são atualizadas considerando todo o conteúdo atual da Silver.
+
+Ao final, devem existir no Catalog Explorer:
+
+```
+hackernews.hacker_news.gold_story_timeline
+
+hackernews.hacker_news.gold_story_summary
+
+hackernews.hacker_news.gold_domain_stats
+
+hackernews.hacker_news.gold_trend_index
+```
+
+Validações no SQL Editor:
+
+A timeline deve ter a mesma quantidade de linhas da Silver, e o summary uma linha por notícia distinta:
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM hackernews.hacker_news.silver_story_snapshots) AS silver_linhas,
+  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_story_timeline) AS timeline_linhas,
+  (SELECT COUNT(DISTINCT story_id) FROM hackernews.hacker_news.silver_story_snapshots) AS silver_noticias,
+  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_story_summary) AS summary_linhas;
+```
+
+O Índice de Tendência deve conter somente notícias do snapshot mais recente:
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_trend_index) AS noticias_no_indice,
+  (SELECT COUNT(*)
+   FROM hackernews.hacker_news.silver_story_snapshots
+   WHERE collected_at = (SELECT MAX(collected_at) FROM hackernews.hacker_news.silver_story_snapshots)
+  ) AS noticias_no_ultimo_snapshot;
+```
+
+Consultas de exploração:
+
+```sql
+-- Notícias em alta no momento
+SELECT trend_rank, trend_index, title, rank, score, comments
+FROM hackernews.hacker_news.gold_trend_index
+ORDER BY trend_rank;
+
+-- Evolução de uma notícia
+SELECT collected_at, rank, score, comments, rank_change, score_delta
+FROM hackernews.hacker_news.gold_story_timeline
+WHERE story_id = '<story_id>'
+ORDER BY collected_at;
+
+-- Notícias com mais tempo no Top 10
+SELECT title, hours_in_top_n, best_rank, peak_score
+FROM hackernews.hacker_news.gold_story_summary
+ORDER BY hours_in_top_n DESC;
+
+-- Domínios mais recorrentes
+SELECT domain, stories_count, stories_reached_top_n, avg_peak_score
+FROM hackernews.hacker_news.gold_domain_stats
+ORDER BY stories_count DESC;
+```
+
+Parâmetros como Top N, janela do Índice de Tendência e pesos dos componentes ficam em constantes no início do `05_silver_to_gold.py`. Após alterá-los, basta executar o pipeline novamente.
+
+Observação sobre o Job: nenhuma alteração é necessária. A task do pipeline passa a atualizar também a Gold.
 
 ### 9. Criar views do relatório de qualidade
 
@@ -592,6 +695,8 @@ Fazer Dry Run.
 Executar o ETL Pipeline.
 Incluir 04_bronze_to_silver.py no mesmo ETL Pipeline.
 Executar o ETL Pipeline novamente e validar silver_story_snapshots.
+Incluir 05_silver_to_gold.py no mesmo ETL Pipeline.
+Executar o ETL Pipeline novamente e validar as tabelas da Gold.
 Executar 03_quality_report.sql uma única vez.
 Criar o Lakeflow Job.
 Configurar a task landing.

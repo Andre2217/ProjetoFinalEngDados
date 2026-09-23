@@ -71,6 +71,8 @@ Bronze / Quarentena
 ↓  
 Silver (snapshots limpos e tipados)  
 ↓  
+Gold (indicadores analíticos)  
+↓  
 Event Log de qualidade
 
 ---
@@ -245,7 +247,110 @@ Entre as métricas previstas estão:
 - tendências por período;
 - Índice de Tendência.
 
-A implementação da Gold será realizada após a consolidação da Silver.
+A Gold é implementada no arquivo `notebooks/05_silver_to_gold.py`, dentro do mesmo Lakeflow ETL Pipeline da Bronze e da Silver.
+
+As tabelas da Gold são **materialized views**. A cada execução do pipeline, elas são atualizadas considerando todo o conteúdo atual da Silver, incluindo os snapshots recém-processados. Isso é necessário porque métricas como pico de score, tempo no ranking e Índice de Tendência dependem do histórico completo.
+
+Os parâmetros analíticos ficam em constantes no início do arquivo, permitindo ajustes sem alterar a lógica:
+
+- `TOP_N_HIGHLIGHT = 10`: faixa de destaque do ranking (Top 10);
+- `TREND_WINDOW_HOURS = 6`: janela recente usada no Índice de Tendência;
+- `MIN_AGE_HOURS = 1.0`: idade mínima usada nas velocidades, para não inflar notícias recém-publicadas;
+- `TREND_WEIGHTS`: pesos dos componentes do Índice de Tendência.
+
+Fluxo entre as tabelas:
+
+```
+silver_story_snapshots → gold_story_timeline → gold_story_summary → gold_domain_stats
+                                             → gold_trend_index
+```
+
+#### gold_story_timeline
+
+`hackernews.hacker_news.gold_story_timeline`
+
+Granularidade: uma linha por notícia em cada snapshot (chave: `story_id` + `collected_at`).
+
+Compara cada snapshot da notícia com o snapshot anterior da mesma notícia:
+
+- `rank_change`: variação de posição (positivo significa que a notícia subiu);
+- `score_delta` e `comments_delta`: variação de score e de comentários;
+- `minutes_since_prev`: tempo real desde a coleta anterior;
+- `score_per_hour_interval` e `comments_per_hour_interval`: velocidade no intervalo;
+- `score_per_hour_lifetime`: score dividido pela idade da notícia;
+- `age_hours`: idade da notícia no momento da coleta;
+- `is_top_n`: se a notícia estava no Top 10 naquela coleta;
+- `is_consecutive`: se a notícia também estava presente na coleta imediatamente anterior.
+
+Como os intervalos entre coletas podem ser irregulares, todas as velocidades são calculadas pelo tempo real entre coletas, e não pela quantidade de snapshots.
+
+Atende às análises de evolução do score, dos comentários e da posição no ranking.
+
+#### gold_story_summary
+
+`hackernews.hacker_news.gold_story_summary`
+
+Granularidade: uma linha por notícia (chave: `story_id`).
+
+Resume a passagem de cada notícia pelo ranking:
+
+- primeira e última aparição (`first_seen_at`, `last_seen_at`);
+- `is_in_latest_snapshot`: se a notícia ainda está no snapshot mais recente;
+- `hours_in_ranking` e `hours_in_top_n`: tempo de permanência no ranking e no Top 10;
+- melhor rank, rank inicial e rank final;
+- pico, valor inicial e valor final de score e de comentários;
+- `score_gain` e `comments_gain`: ganho durante o período observado;
+- `score_gain_per_hour` e `comments_gain_per_hour`: ganho médio por hora.
+
+O tempo de permanência é calculado pela soma dos intervalos entre coletas consecutivas em que a notícia estava presente (`is_consecutive`). Assim, uma notícia que sai do ranking e retorna depois não tem o período de ausência contabilizado.
+
+Atende às análises de tempo de permanência no Top N e de notícias com maior crescimento, evitando que uma mesma notícia seja contada várias vezes.
+
+#### gold_domain_stats
+
+`hackernews.hacker_news.gold_domain_stats`
+
+Granularidade: uma linha por domínio.
+
+- `stories_count`: quantidade de notícias distintas que chegaram ao ranking;
+- `stories_reached_top_n`: quantas chegaram ao Top 10;
+- melhor rank alcançado;
+- pico de score médio e máximo;
+- pico de comentários médio;
+- tempo médio no ranking.
+
+Permite diferenciar domínios que aparecem com frequência de domínios que apresentam melhor desempenho.
+
+Notícias sem link externo (por exemplo, posts do tipo Ask HN) são agrupadas como `(post sem link)`.
+
+#### gold_trend_index
+
+`hackernews.hacker_news.gold_trend_index`
+
+Granularidade: uma linha por notícia presente no snapshot mais recente.
+
+O Índice de Tendência (0 a 100) indica quais notícias estão ganhando força no momento, considerando as últimas 6 horas de coleta.
+
+Cada componente é normalizado de 0 a 1 com `percent_rank`, com base na posição relativa entre as notícias do snapshot atual, e ponderado:
+
+| Componente | Peso | Descrição |
+|---|---|---|
+| Velocidade de score | 40% | score dividido pela idade da notícia |
+| Velocidade de comentários | 25% | comentários divididos pela idade da notícia |
+| Momentum de ranking | 20% | posição no início da janela menos a posição atual |
+| Posição atual | 15% | quanto melhor o rank atual, maior o valor |
+
+A recência da publicação já está considerada nas velocidades, por isso não é um componente separado.
+
+A tabela também expõe os valores normalizados de cada componente (`*_pct`), permitindo explicar por que cada notícia recebeu seu índice.
+
+O índice é descritivo: indica o momento atual de cada notícia e não representa uma previsão de permanência ou entrada no Top 10.
+
+#### Limitações da Gold
+
+- As métricas refletem apenas o período em que a notícia esteve no ranking coletado. Quando uma notícia sai do ranking, sua evolução deixa de ser acompanhada.
+- O tempo de permanência considera que a notícia esteve presente durante todo o intervalo entre duas coletas consecutivas. Com coletas a cada 30 minutos, essa aproximação é adequada.
+- A qualidade das análises depende do volume de snapshots acumulados.
 
 ---
 
@@ -275,6 +380,8 @@ Registros aprovados seguem para a Bronze.
 Registros reprovados seguem para a Quarentena.
 
 Na camada Silver, novas Expectations validam o resultado da tipagem (ver seção **Qualidade na Silver**).
+
+A camada Gold não aplica novas Expectations, pois é construída exclusivamente sobre dados já validados na Silver.
 
 ---
 
@@ -321,6 +428,8 @@ Task 2 — Landing para Bronze e Silver
 Lakeflow ETL Pipeline utilizando `02_landing_to_bronze.py` e `04_bronze_to_silver.py`
 
 Como a Silver faz parte do mesmo ETL Pipeline, o próprio Lakeflow resolve a dependência Bronze → Silver, sem necessidade de uma task adicional no Job.
+
+A Gold também faz parte do mesmo ETL Pipeline (`05_silver_to_gold.py`). O Lakeflow resolve a dependência Silver → Gold, portanto a task do pipeline atualiza Bronze, Silver e Gold em sequência, sem necessidade de uma task adicional.
 
 Futuramente serão adicionadas tarefas para:
 
@@ -395,6 +504,8 @@ Permite processar somente novos arquivos sem reler todo o histórico a cada exec
 
 Responsável pelo fluxo Landing → Bronze → Silver.
 
+Com a Gold, o pipeline passa a cobrir o fluxo completo Landing → Bronze → Silver → Gold, utilizando streaming tables na Bronze e na Silver e materialized views na Gold.
+
 Utiliza:
 
 - Auto Loader;
@@ -449,6 +560,7 @@ notebooks/
 - 02_landing_to_bronze.py
 - 03_quality_report.sql
 - 04_bronze_to_silver.py
+- 05_silver_to_gold.py
 
 docs/
 - architecture.md
