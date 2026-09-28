@@ -1,0 +1,62 @@
+bundle:
+  name: hacker_news_pipeline
+
+variables:
+  catalog:
+    description: Catálogo do Unity Catalog usado pelo projeto
+    default: hackernews
+  schema:
+    description: Schema do Unity Catalog usado pelo projeto
+    default: hacker_news
+
+resources:
+  pipelines:
+    hacker_news_etl:
+      name: Hacker News - Landing to Gold
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      continuous: false
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ./notebooks/02_landing_to_bronze.py
+        - file:
+            path: ./notebooks/04_bronze_to_silver.py
+        - file:
+            path: ./notebooks/05_silver_to_gold.py
+      event_log:
+        catalog: ${var.catalog}
+        schema: ${var.schema}
+        name: pipeline_event_log
+
+  jobs:
+    hacker_news_job:
+      name: Hacker News Pipeline
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0,30 * * * ?"
+        timezone_id: America/Fortaleza
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: landing
+          notebook_task:
+            notebook_path: ./notebooks/01_landing.py
+          max_retries: 2
+          min_retry_interval_millis: 120000
+          timeout_seconds: 1200
+
+        - task_key: landing_to_gold
+          depends_on:
+            - task_key: landing
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.hacker_news_etl.id}
+            full_refresh: false
+          max_retries: 2
+          min_retry_interval_millis: 120000
+          timeout_seconds: 1200
+
+targets:
+  dev:
+    mode: development
+    default: true
