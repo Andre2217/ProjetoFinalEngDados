@@ -124,7 +124,7 @@ Selecione:
 
 Nome sugerido:
 
-`Hacker News - Landing to Bronze`
+`Hacker News - Medallion Pipeline`
 
 Configure o destino padrão:
 

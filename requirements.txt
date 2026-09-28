@@ -3,3 +3,6 @@ great-expectations==1.9.3
 pytest==8.4.2
 streamlit==1.49.1
 databricks-labs-dqx==0.15.0
+databricks-sdk>=0.35
+databricks-sql-connector>=4,<5
+pandas>=2,<3
