@@ -1,62 +1,169 @@
 bundle:
   name: hacker_news_pipeline
-
-variables:
-  catalog:
-    description: Catálogo do Unity Catalog usado pelo projeto
-    default: hackernews
-  schema:
-    description: Schema do Unity Catalog usado pelo projeto
-    default: hacker_news
+  engine: direct
 
 resources:
+
+  catalogs:
+    hackernews:
+      name: hackernews
+      comment: Catalog do projeto Hacker News
+
+      grants:
+        - principal: "account users"
+          privileges:
+            - ALL_PRIVILEGES
+
+        - principal: ${resources.apps.hackernews.service_principal_client_id}
+          privileges:
+            - USE_CATALOG
+
+
+  schemas:
+    hacker_news:
+      name: hacker_news
+      catalog_name: ${resources.catalogs.hackernews.name}
+      comment: Schema principal do projeto Hacker News
+
+      grants:
+        - principal: "account users"
+          privileges:
+            - ALL_PRIVILEGES
+
+        - principal: ${resources.apps.hackernews.service_principal_client_id}
+          privileges:
+            - USE_SCHEMA
+            - SELECT
+
+
+  volumes:
+    data:
+      name: data
+      catalog_name: ${resources.catalogs.hackernews.name}
+      schema_name: ${resources.schemas.hacker_news.name}
+      volume_type: MANAGED
+      comment: Volume utilizado pela camada Landing
+
+      grants:
+        - principal: "account users"
+          privileges:
+            - ALL_PRIVILEGES
+
+
+  sql_warehouses:
+    hackernews_sql_warehouse:
+      name: Hacker News SQL Warehouse
+      cluster_size: "2X-Small"
+      warehouse_type: PRO
+      enable_serverless_compute: true
+      min_num_clusters: 1
+      max_num_clusters: 1
+      auto_stop_mins: 10
+
+
   pipelines:
-    hacker_news_etl:
-      name: Hacker News - Landing to Gold
-      catalog: ${var.catalog}
-      schema: ${var.schema}
+    hacker_news_medallion_pipeline:
+      name: Hacker News - Medallion Pipeline
+
+      catalog: ${resources.catalogs.hackernews.name}
+      schema: ${resources.schemas.hacker_news.name}
+
       serverless: true
-      continuous: false
+      ##continuous: false
       channel: CURRENT
+
+      root_path: ${workspace.file_path}/notebooks
+
       libraries:
         - file:
             path: ./notebooks/02_landing_to_bronze.py
+
         - file:
             path: ./notebooks/04_bronze_to_silver.py
+
         - file:
             path: ./notebooks/05_silver_to_gold.py
+
       event_log:
-        catalog: ${var.catalog}
-        schema: ${var.schema}
+        catalog: ${resources.catalogs.hackernews.name}
+        schema: ${resources.schemas.hacker_news.name}
         name: pipeline_event_log
 
+
   jobs:
-    hacker_news_job:
+    hacker_news_pipeline:
       name: Hacker News Pipeline
+
       max_concurrent_runs: 1
+
       schedule:
         quartz_cron_expression: "0 0,30 * * * ?"
         timezone_id: America/Fortaleza
         pause_status: UNPAUSED
+
+      git_source:
+        git_url: https://github.com/Andre2217/ProjetoFinalEngDados
+        git_provider: gitHub
+        git_branch: main
+
       tasks:
+
         - task_key: landing
+
           notebook_task:
-            notebook_path: ./notebooks/01_landing.py
+            notebook_path: notebooks/01_landing
+            source: GIT
+
           max_retries: 2
           min_retry_interval_millis: 120000
           timeout_seconds: 1200
 
-        - task_key: landing_to_gold
+
+        - task_key: medallion_pipeline
+
           depends_on:
             - task_key: landing
+
+          run_if: ALL_SUCCESS
+
           pipeline_task:
-            pipeline_id: ${resources.pipelines.hacker_news_etl.id}
+            pipeline_id: ${resources.pipelines.hacker_news_medallion_pipeline.id}
             full_refresh: false
+
           max_retries: 2
           min_retry_interval_millis: 120000
           timeout_seconds: 1200
 
+
+  apps:
+    hackernews:
+      name: hackernews
+      description: Dashboard Streamlit do projeto Hacker News
+
+      git_repository:
+        url: https://github.com/Andre2217/ProjetoFinalEngDados
+        provider: gitHub
+
+      git_source:
+        branch: main
+
+      config:
+        command:
+          - streamlit
+          - run
+          - app.py
+
+        env:
+          - name: DATABRICKS_HTTP_PATH
+            value: /sql/1.0/warehouses/${resources.sql_warehouses.hackernews_sql_warehouse.id}
+
+      resources:
+        - name: sql_warehouse
+          sql_warehouse:
+            id: ${resources.sql_warehouses.hackernews_sql_warehouse.id}
+            permission: CAN_USE
+
+
 targets:
-  dev:
-    mode: development
+  default:
     default: true
