@@ -1,4 +1,4 @@
-# Pipeline de Monitoramento e Detecção de Tendências Tecnológicas no Hacker News
+/Volumes/hackernews/hacker_news/data/landing/2026/09/12/# Pipeline de Monitoramento e Detecção de Tendências Tecnológicas no Hacker News
 
 Projeto desenvolvido para a disciplina de **Projetos da Pós-Graduação em Engenharia de Dados da UNIFOR**.
 
