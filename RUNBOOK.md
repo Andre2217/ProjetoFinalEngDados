@@ -1,357 +1,615 @@
-
-### `RUNBOOK.md`
-
-```md
 # Guia de Configuração e Execução
 
-Este documento descreve como configurar e executar o projeto em um novo ambiente Databricks.
+Este documento descreve como configurar, executar e validar o projeto **Pipeline de Monitoramento e Detecção de Tendências em Tecnologia a partir do Hacker News** em um novo ambiente Databricks.
 
-O objetivo é permitir que integrantes da equipe, professor ou avaliadores consigam reproduzir a solução utilizando apenas o repositório do GitHub.
+O projeto pode ser inicializado de duas formas:
 
-> Este arquivo será atualizado conforme novas etapas da pipeline forem implementadas.
+1. **Parte 1 — Configuração automática utilizando `databricks.yml`**  
+   Método recomendado. O Databricks Declarative Automation Bundle cria automaticamente os principais recursos do projeto.
+
+2. **Parte 2 — Configuração manual**  
+   Deve ser utilizada caso o Bundle não funcione corretamente no workspace ou algum recurso não possa ser criado automaticamente.
+
+> Não é necessário executar os dois métodos. Utilize primeiro a Parte 1. A Parte 2 funciona como procedimento de contingência.
 
 ---
 
-# 1. Repositório
+# Pré-requisitos
+
+Antes de iniciar, é necessário:
+
+- acesso a um workspace Databricks;
+- Unity Catalog habilitado;
+- permissão para criar Catalog, Schema, Volume, Pipeline, Job, SQL Warehouse e Databricks App;
+- acesso ao GitHub;
+- acesso ao repositório do projeto.
 
 Repositório oficial:
 
 `https://github.com/Andre2217/ProjetoFinalEngDados`
 
-No Databricks, crie uma Git Folder conectada ao repositório.
+A estrutura principal esperada é:
 
-Após conectar, confirme que os arquivos do projeto estão disponíveis.
-
-Estrutura mínima esperada:
-
+```text
 ProjetoFinalEngDados/
-
-notebooks/
-- 00_setup.sql
-- 01_landing.py
-- 02_landing_to_bronze.py
-- 03_quality_report.sql
-- 04_bronze_to_silver.py
-- 05_silver_to_gold.py
-
-requirements.txt
-
-README.md
-
-RUNBOOK.md
+│
+├── databricks.yml
+├── requirements.txt
+├── README.md
+├── RUNBOOK.md
+│
+├── notebooks/
+│   ├── 00_setup.sql
+│   ├── 01_landing.py
+│   ├── 02_landing_to_bronze.py
+│   ├── 03_quality_report.sql
+│   ├── 04_bronze_to_silver.py
+│   └── 05_silver_to_gold.py
+│
+└── arquivos da aplicação Streamlit
+```
 
 ---
 
-# 2. Criar estrutura do Unity Catalog
+# PARTE 1 — CONFIGURAÇÃO AUTOMÁTICA COM `databricks.yml`
 
-Execute uma única vez:
+## 1. Conectar o repositório ao Databricks
 
-`notebooks/00_setup.sql`
+No Databricks, acesse:
 
-O arquivo deve criar:
-
-Catalog:
-
-`hackernews`
-
-Schema:
-
-`hacker_news`
-
-Volume:
-
-`data`
-
-Comandos principais:
-
-```sql
-CREATE CATALOG IF NOT EXISTS hackernews;
-
-CREATE SCHEMA IF NOT EXISTS hackernews.hacker_news;
-
-CREATE VOLUME IF NOT EXISTS hackernews.hacker_news.data;
-```
-Após a execução, confirme no Catalog Explorer:
-```
-hackernews → hacker_news → Volumes → data
+```text
+Workspace
+→ Create
+→ Git folder
 ```
 
-### 3. Testar a Landing
-Abra:
-`
-notebooks/01_landing.py
-`
+Informe o repositório:
 
-Execute o notebook.
+```text
+https://github.com/Andre2217/ProjetoFinalEngDados
+```
 
-Ele deve realizar:
+Utilize a branch:
 
-Hacker News API -> consulta das Top Stories
--> 
-consulta dos detalhes de cada notícia
--> 
-geração de NDJSON
--> 
-Unity Catalog Volume
+```text
+main
+```
 
-Os dados devem aparecer em:
+Após a criação, confirme que o arquivo abaixo está disponível na raiz do projeto:
 
-`/Volumes/hackernews/hacker_news/data/landing`
+```text
+databricks.yml
+```
 
-A organização esperada é:
+---
 
-`landing/AAAA/MM/DD/arquivo.ndjson`
+# 2. Implantar o Bundle
 
-Exemplo:
+Abra o arquivo:
 
-`landing/2026/09/12/hacker_news_103000.ndjson`
+```text
+databricks.yml
+```
 
-É possível verificar os arquivos através do Catalog Explorer.
+No editor do Databricks, localize o painel:
 
-### 4. Criar o ETL Pipeline Landing → Bronze
+```text
+Deployments
+```
 
-Esta configuração precisa ser feita uma vez em cada workspace Databricks.
+Selecione o target:
 
-A configuração criada na interface de um usuário não é transferida automaticamente através do Git.
+```text
+default
+```
+
+Clique em:
+
+```text
+Deploy
+```
+
+O Databricks primeiro validará o Bundle.
+
+Revise a lista de recursos que serão criados e confirme novamente em:
+
+```text
+Deploy
+```
+
+Acompanhe a execução através da janela:
+
+```text
+Project output
+```
+
+O deploy deve finalizar sem erros.
+
+---
+
+## 2.1. Alternativa utilizando Databricks CLI
+
+Caso o Bundle esteja sendo executado através de terminal, entre na pasta do projeto e execute:
+
+```bash
+databricks bundle validate -t default
+```
+
+Se a validação finalizar corretamente:
+
+```bash
+databricks bundle deploy -t default
+```
+
+Para executar o Job criado pelo Bundle:
+
+```bash
+databricks bundle run hacker_news_pipeline -t default
+```
+
+O método pela interface do Databricks é suficiente para a utilização normal deste projeto.
+
+---
+
+# 3. Recursos que devem ser criados pelo Bundle
+
+Após o deploy, devem existir os seguintes recursos:
+
+| Recurso | Nome |
+|---|---|
+| Catalog | `hackernews` |
+| Schema | `hacker_news` |
+| Volume | `data` |
+| SQL Warehouse | `Hacker News SQL Warehouse` |
+| ETL Pipeline | `Hacker News - Medallion Pipeline` |
+| Lakeflow Job | `Hacker News Pipeline` |
+| Databricks App | `hackernews` |
+
+Além disso, o Job deve possuir as tasks:
+
+```text
+landing
+↓
+medallion_pipeline
+```
+
+O Job deve estar configurado para execução:
+
+```text
+a cada 30 minutos
+```
+
+---
+
+# 4. Validar Catalog, Schema e Volume
 
 Acesse:
 
-`Jobs & Pipelines`
+```text
+Catalog
+→ Catalog Explorer
+→ hackernews
+→ hacker_news
+```
 
-Selecione:
+Confirme a existência do Volume:
 
-`New → ETL Pipeline`
+```text
+Volumes
+→ data
+```
 
-Nome sugerido:
+A estrutura esperada é:
 
-`Hacker News - Medallion Pipeline`
+```text
+hackernews
+└── hacker_news
+    └── Volumes
+        └── data
+```
 
-Configure o destino padrão:
+O caminho utilizado pela Landing será:
 
-Catalog:
+```text
+/Volumes/hackernews/hacker_news/data/landing
+```
 
-`hackernews`
+---
 
-Schema:
+# 5. Validar o SQL Warehouse
 
-`hacker_news`
+Acesse:
 
-Adicione como código-fonte:
+```text
+SQL
+→ SQL Warehouses
+```
 
-`notebooks/02_landing_to_bronze.py`
+Confirme a existência de:
 
-Se o Databricks adicionar automaticamente arquivos de exemplo ao pipeline, remova-os das fontes.
+```text
+Hacker News SQL Warehouse
+```
 
-O pipeline deve utilizar compute Serverless quando essa for a opção disponível no workspace.
+A configuração criada pelo Bundle deve utilizar SQL Warehouse Serverless quando essa funcionalidade estiver disponível no workspace.
 
-### 5. Configurar Event Log
+O Warehouse será utilizado principalmente pelo Databricks App para realizar consultas SQL sobre as tabelas da camada Gold.
 
-Dentro das configurações do ETL Pipeline, publique o Event Log no Unity Catalog.
+---
 
-Configure:
+# 6. Validar o ETL Pipeline
 
-Catalog:
+Acesse:
 
-`hackernews`
+```text
+Jobs & Pipelines
+→ Pipelines
+```
 
-Schema:
+Abra:
 
-`hacker_news`
+```text
+Hacker News - Medallion Pipeline
+```
 
-Nome:
+Confirme que o destino padrão está configurado como:
 
-`pipeline_event_log`
+```text
+Catalog: hackernews
+Schema: hacker_news
+```
 
-O resultado será:
+Confirme também que os seguintes códigos fazem parte da Pipeline:
 
-`hackernews.hacker_news.pipeline_event_log`
+```text
+notebooks/02_landing_to_bronze.py
+notebooks/04_bronze_to_silver.py
+notebooks/05_silver_to_gold.py
+```
 
-Esse Event Log será utilizado como histórico oficial das execuções e das métricas de qualidade.
+O Pipeline deve representar o fluxo:
 
-### 6. Validar o ETL Pipeline
+```text
+Landing
+↓
+Bronze
+↓
+Silver
+↓
+Gold
+```
 
-Antes da primeira execução completa, utilize:
+O processamento da Landing utiliza Auto Loader e mantém o controle dos arquivos que já foram processados.
 
-Dry run
+---
 
-O Dry Run valida a definição do pipeline.
+# 7. Validar o Event Log
 
-Se não houver erros, execute:
+Após a primeira execução do Pipeline, acesse:
 
-Run pipeline
+```text
+Catalog Explorer
+→ hackernews
+→ hacker_news
+```
 
-Na primeira execução, o Auto Loader deverá processar todos os arquivos existentes na Landing.
+Deve existir:
 
-Nas execuções seguintes, apenas novos arquivos serão processados.
+```text
+pipeline_event_log
+```
 
-Ao final, devem existir no Catalog Explorer:
+Nome completo:
 
-``` 
+```text
+hackernews.hacker_news.pipeline_event_log
+```
+
+Esse Event Log registra informações de execução, métricas e expectativas de qualidade do Lakeflow Pipeline.
+
+---
+
+# 8. Validar o Lakeflow Job
+
+Acesse:
+
+```text
+Jobs & Pipelines
+→ Jobs
+```
+
+Abra:
+
+```text
+Hacker News Pipeline
+```
+
+O Job deve possuir duas tasks.
+
+## Task 1 — Landing
+
+```text
+Nome: landing
+Tipo: Notebook
+Notebook: notebooks/01_landing
+Git branch: main
+```
+
+Essa task consulta a API oficial do Hacker News e cria um novo snapshot NDJSON.
+
+---
+
+## Task 2 — Medallion Pipeline
+
+```text
+Nome: medallion_pipeline
+Tipo: Pipeline
+Pipeline: Hacker News - Medallion Pipeline
+```
+
+Dependência:
+
+```text
+landing
+↓
+medallion_pipeline
+```
+
+A segunda task somente deve executar quando a task `landing` terminar com sucesso.
+
+---
+
+# 9. Validar o agendamento
+
+Dentro do Job:
+
+```text
+Hacker News Pipeline
+```
+
+acesse:
+
+```text
+Schedules & Triggers
+```
+
+Confirme que existe um agendamento ativo para:
+
+```text
+a cada 30 minutos
+```
+
+O comportamento esperado é aproximadamente:
+
+```text
+00:00
+00:30
+01:00
+01:30
+02:00
+02:30
+...
+```
+
+O timezone configurado pelo projeto é:
+
+```text
+America/Fortaleza
+```
+
+---
+
+# 10. Validar o Databricks App
+
+Acesse:
+
+```text
+Apps
+```
+
+Abra:
+
+```text
+hackernews
+```
+
+Confirme:
+
+```text
+Git repository:
+https://github.com/Andre2217/ProjetoFinalEngDados
+
+Branch:
+main
+```
+
+O App deve possuir acesso ao:
+
+```text
+Hacker News SQL Warehouse
+```
+
+com permissão:
+
+```text
+CAN USE
+```
+
+Se o App tiver sido criado, mas ainda não estiver executando, abra sua página e utilize:
+
+```text
+Deploy
+```
+
+ou:
+
+```text
+Start
+```
+
+conforme as opções apresentadas pelo workspace.
+
+Após iniciar, acesse o link disponibilizado pelo próprio Databricks App e confirme que o dashboard é carregado.
+
+---
+
+# 11. Primeira execução completa
+
+Após verificar todos os recursos, execute manualmente o Job uma vez antes de depender apenas do agendamento automático.
+
+Acesse:
+
+```text
+Jobs & Pipelines
+→ Jobs
+→ Hacker News Pipeline
+```
+
+Clique em:
+
+```text
+Run now
+```
+
+O fluxo esperado é:
+
+```text
+Hacker News API
+        ↓
+      landing
+        ↓
+arquivo NDJSON no Volume
+        ↓
+medallion_pipeline
+        ↓
+Bronze / Quarentena
+        ↓
+Silver
+        ↓
+Gold
+```
+
+As duas tasks devem finalizar com status:
+
+```text
+Succeeded
+```
+
+---
+
+# 12. Validar a Landing
+
+Após a task `landing`, acesse:
+
+```text
+Catalog Explorer
+→ hackernews
+→ hacker_news
+→ Volumes
+→ data
+→ landing
+```
+
+Os arquivos devem seguir aproximadamente:
+
+```text
+landing/AAAA/MM/DD/arquivo.ndjson
+```
+
+Exemplo:
+
+```text
+landing/2026/09/29/hacker_news_183000.ndjson
+```
+
+Cada execução do Job gera um novo snapshot.
+
+Os snapshots antigos não devem ser apagados.
+
+---
+
+# 13. Validar Bronze e Quarentena
+
+Após o Pipeline executar, devem existir:
+
+```text
 hackernews.hacker_news.bronze_stories
 
 hackernews.hacker_news.quarantine_stories
-
-hackernews.hacker_news.pipeline_event_log
-```
-### 7. Validar a Bronze
-
-Abra:
-
-`Catalog Explorer → hackernews → hacker_news → bronze_stories`
-
-A tabela contém apenas registros aprovados pelas regras de qualidade.
-
-Caso seja necessário visualizar os registros através de Sample Data, o Databricks poderá solicitar a inicialização de um SQL Warehouse.
-
-No ambiente Free Edition normalmente será utilizado o:
-
-Serverless Starter Warehouse
-
-Isso é esperado.
-
-O SQL Warehouse é utilizado para consultar os dados e não é o compute responsável pela execução do ETL Pipeline.
-
-### 8. Validar a Quarentena
-
-Abra:
-
-`hackernews.hacker_news.quarantine_stories`
-
-Essa tabela contém registros que não passaram nas regras de qualidade.
-
-Ela também contém informações que permitem identificar o motivo da rejeição.
-
-A existência da tabela de quarentena garante que registros problemáticos não sejam descartados silenciosamente.
-
-### 8.1. Adicionar a Silver ao ETL Pipeline
-
-A Silver não exige a criação de nenhum objeto novo no workspace.
-
-O arquivo `notebooks/04_bronze_to_silver.py` é adicionado ao **mesmo** ETL Pipeline criado no passo 4 (`Hacker News - Landing to Bronze`).
-
-Isso é necessário porque o código lê a tabela `bronze_stories` pelo nome curto, o que só funciona dentro do mesmo pipeline. O Lakeflow identifica sozinho a dependência Bronze → Silver.
-
-Pré-requisito: os passos 1 a 8 já executados, com dados na `bronze_stories`.
-
-Passo a passo:
-
-1. Atualize o Git Folder com `Pull` e confirme que o arquivo `notebooks/04_bronze_to_silver.py` está disponível.
-2. Abra o ETL Pipeline `Hacker News - Landing to Bronze`.
-3. No painel de arquivos à esquerda, selecione a aba `All files`.
-4. Navegue até `notebooks/04_bronze_to_silver.py`.
-5. Nos três pontinhos do arquivo, selecione `Include in pipeline`.
-6. Confirme que o arquivo aparece na aba `Pipeline`, junto com o `02_landing_to_bronze.py`.
-
-Não é necessário criar a tabela manualmente. Na primeira execução, o pipeline cria a `silver_story_snapshots` em `hackernews.hacker_news`.
-
-### 8.2. Executar e validar a Silver
-
-Execute:
-
-Dry run
-
-No `Pipeline graph`, deve aparecer o fluxo:
-
-```
-landing_prepared → landing_validated → bronze_stories → silver_story_snapshots
-                                     → quarantine_stories
 ```
 
-Se não houver erros, execute:
+A `bronze_stories` contém registros aprovados pelas regras de qualidade.
 
-Run pipeline
+A `quarantine_stories` contém registros rejeitados pelas regras de qualidade, permitindo identificar o motivo da rejeição.
 
-Na primeira execução, a Silver processa todos os registros já existentes na Bronze. Nas execuções seguintes, apenas os registros novos.
+---
 
-Ao final, deve existir no Catalog Explorer:
+# 14. Validar Silver
 
-```
+Deve existir:
+
+```text
 hackernews.hacker_news.silver_story_snapshots
 ```
 
-Validações no SQL Editor:
-
-Quantidade de linhas da Silver deve ser igual à da Bronze:
+Execute:
 
 ```sql
 SELECT
-  (SELECT COUNT(*) FROM hackernews.hacker_news.bronze_stories) AS bronze,
-  (SELECT COUNT(*) FROM hackernews.hacker_news.silver_story_snapshots) AS silver;
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.bronze_stories) AS bronze,
+
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.silver_story_snapshots) AS silver;
 ```
 
-Não deve haver duplicidade de notícia no mesmo snapshot (resultado esperado: nenhuma linha):
+Também valide possíveis duplicidades:
 
 ```sql
-SELECT story_id, collected_at, COUNT(*) AS qtd
+SELECT
+    story_id,
+    collected_at,
+    COUNT(*) AS qtd
 FROM hackernews.hacker_news.silver_story_snapshots
 GROUP BY story_id, collected_at
 HAVING COUNT(*) > 1;
 ```
 
-Quantidade de snapshots e de notícias distintas:
+O resultado esperado é:
+
+```text
+nenhuma linha
+```
+
+A granularidade da Silver é:
+
+```text
+uma notícia por snapshot
+```
+
+Sua chave lógica é:
+
+```text
+story_id + collected_at
+```
+
+Para verificar o histórico existente:
 
 ```sql
 SELECT
-  COUNT(DISTINCT collected_at) AS snapshots,
-  COUNT(DISTINCT story_id) AS noticias,
-  COUNT(*) AS linhas
+    COUNT(DISTINCT collected_at) AS snapshots,
+    COUNT(DISTINCT story_id) AS noticias,
+    COUNT(*) AS linhas
 FROM hackernews.hacker_news.silver_story_snapshots;
 ```
 
-Granularidade da tabela: uma linha por notícia em cada snapshot (chave lógica: `story_id` + `collected_at`).
+---
 
-Para popular a Silver com novos dados manualmente:
+# 15. Validar Gold
 
-1. Execute `notebooks/01_landing.py` (gera um novo snapshot na Landing).
-2. Execute o ETL Pipeline com `Run pipeline` (processa Landing → Bronze → Silver).
+Após uma execução bem-sucedida devem existir:
 
-Recomenda-se gerar alguns snapshots com alguns minutos de intervalo, para que a mesma notícia apareça em coletas diferentes e seja possível observar a evolução de rank, score e comentários.
-
-Observação sobre o Job: nenhuma alteração é necessária. A task `landing_to_bronze` executa o ETL Pipeline inteiro, portanto também passa a atualizar a Silver.
-
-Observação sobre o Git Folder: o pipeline executa o código da branch ativa no Git Folder. Confirme a branch antes de executar.
-
-### 8.3. Adicionar a Gold ao ETL Pipeline
-
-Assim como a Silver, a Gold não exige a criação de nenhum objeto novo no workspace.
-
-O arquivo `notebooks/05_silver_to_gold.py` é adicionado ao **mesmo** ETL Pipeline (`Hacker News - Landing to Bronze`), pois lê a tabela `silver_story_snapshots` pelo nome curto.
-
-Pré-requisito: os passos 8.1 e 8.2 já executados, com dados na `silver_story_snapshots`.
-
-Passo a passo:
-
-1. Atualize o Git Folder com `Pull` e confirme que o arquivo `notebooks/05_silver_to_gold.py` está disponível.
-2. Abra o ETL Pipeline `Hacker News - Landing to Bronze`.
-3. No painel de arquivos à esquerda, selecione a aba `All files`.
-4. Navegue até `notebooks/05_silver_to_gold.py`.
-5. Nos três pontinhos do arquivo, selecione `Include in pipeline`.
-6. Confirme que o arquivo aparece na aba `Pipeline`, junto com o `02_landing_to_bronze.py` e o `04_bronze_to_silver.py`.
-
-Não é necessário criar as tabelas manualmente. Na primeira execução, o pipeline cria as quatro tabelas da Gold em `hackernews.hacker_news`.
-
-### 8.4. Executar e validar a Gold
-
-Execute:
-
-Dry run
-
-No `Pipeline graph`, deve aparecer o fluxo:
-
-```
-silver_story_snapshots → gold_story_timeline → gold_story_summary → gold_domain_stats
-                                             → gold_trend_index
-```
-
-Se não houver erros, execute:
-
-Run pipeline
-
-As tabelas da Gold são materialized views. A cada execução, são atualizadas considerando todo o conteúdo atual da Silver.
-
-Ao final, devem existir no Catalog Explorer:
-
-```
+```text
 hackernews.hacker_news.gold_story_timeline
 
 hackernews.hacker_news.gold_story_summary
@@ -361,89 +619,146 @@ hackernews.hacker_news.gold_domain_stats
 hackernews.hacker_news.gold_trend_index
 ```
 
-Validações no SQL Editor:
-
-A timeline deve ter a mesma quantidade de linhas da Silver, e o summary uma linha por notícia distinta:
+Validação:
 
 ```sql
 SELECT
-  (SELECT COUNT(*) FROM hackernews.hacker_news.silver_story_snapshots) AS silver_linhas,
-  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_story_timeline) AS timeline_linhas,
-  (SELECT COUNT(DISTINCT story_id) FROM hackernews.hacker_news.silver_story_snapshots) AS silver_noticias,
-  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_story_summary) AS summary_linhas;
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.silver_story_snapshots)
+        AS silver_linhas,
+
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.gold_story_timeline)
+        AS timeline_linhas,
+
+    (SELECT COUNT(DISTINCT story_id)
+     FROM hackernews.hacker_news.silver_story_snapshots)
+        AS silver_noticias,
+
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.gold_story_summary)
+        AS summary_linhas;
 ```
 
-O Índice de Tendência deve conter somente notícias do snapshot mais recente:
+O Índice de Tendência deve representar apenas o snapshot mais recente:
 
 ```sql
 SELECT
-  (SELECT COUNT(*) FROM hackernews.hacker_news.gold_trend_index) AS noticias_no_indice,
-  (SELECT COUNT(*)
-   FROM hackernews.hacker_news.silver_story_snapshots
-   WHERE collected_at = (SELECT MAX(collected_at) FROM hackernews.hacker_news.silver_story_snapshots)
-  ) AS noticias_no_ultimo_snapshot;
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.gold_trend_index)
+        AS noticias_no_indice,
+
+    (SELECT COUNT(*)
+     FROM hackernews.hacker_news.silver_story_snapshots
+     WHERE collected_at = (
+         SELECT MAX(collected_at)
+         FROM hackernews.hacker_news.silver_story_snapshots
+     ))
+        AS noticias_no_ultimo_snapshot;
 ```
 
-Consultas de exploração:
+---
+
+# 16. Consultas de exploração da Gold
+
+## Notícias em alta
 
 ```sql
--- Notícias em alta no momento
-SELECT trend_rank, trend_index, title, rank, score, comments
+SELECT
+    trend_rank,
+    trend_index,
+    title,
+    rank,
+    score,
+    comments
 FROM hackernews.hacker_news.gold_trend_index
 ORDER BY trend_rank;
+```
 
--- Evolução de uma notícia
-SELECT collected_at, rank, score, comments, rank_change, score_delta
+## Evolução de uma notícia
+
+```sql
+SELECT
+    collected_at,
+    rank,
+    score,
+    comments,
+    rank_change,
+    score_delta
 FROM hackernews.hacker_news.gold_story_timeline
 WHERE story_id = '<story_id>'
 ORDER BY collected_at;
+```
 
--- Notícias com mais tempo no Top 10
-SELECT title, hours_in_top_n, best_rank, peak_score
+## Notícias com maior permanência no Top N
+
+```sql
+SELECT
+    title,
+    hours_in_top_n,
+    best_rank,
+    peak_score
 FROM hackernews.hacker_news.gold_story_summary
 ORDER BY hours_in_top_n DESC;
+```
 
--- Domínios mais recorrentes
-SELECT domain, stories_count, stories_reached_top_n, avg_peak_score
+## Domínios mais recorrentes
+
+```sql
+SELECT
+    domain,
+    stories_count,
+    stories_reached_top_n,
+    avg_peak_score
 FROM hackernews.hacker_news.gold_domain_stats
 ORDER BY stories_count DESC;
 ```
 
-Parâmetros como Top N, janela do Índice de Tendência e pesos dos componentes ficam em constantes no início do `05_silver_to_gold.py`. Após alterá-los, basta executar o pipeline novamente.
+---
 
-Observação sobre o Job: nenhuma alteração é necessária. A task do pipeline passa a atualizar também a Gold.
+# 17. Criar as views do relatório de qualidade
 
-### 9. Criar views do relatório de qualidade
+O Bundle cria a infraestrutura principal, mas as views definidas em:
 
-Após a primeira execução bem-sucedida do ETL Pipeline, execute uma única vez:
+```text
+notebooks/03_quality_report.sql
+```
 
-`notebooks/03_quality_report.sql`
+devem ser criadas após a primeira execução bem-sucedida do Pipeline.
 
-Esse arquivo cria views sobre o Event Log.
+Execute esse arquivo uma única vez.
 
-As principais views são:
+Ele deve criar:
 
-`hackernews.hacker_news.pipeline_runs
+```text
+hackernews.hacker_news.pipeline_runs
 
-hackernews.hacker_news.quality_expectations`
+hackernews.hacker_news.quality_expectations
+```
 
-O arquivo SQL não precisa ser executado a cada atualização da pipeline.
+As views consultam diretamente:
 
-As views consultam diretamente o `pipeline_event_log.`
+```text
+hackernews.hacker_news.pipeline_event_log
+```
 
-Portanto:
+Portanto, não é necessário executar novamente o SQL após cada Pipeline.
 
-Pipeline executa novamente
+O comportamento é:
+
+```text
+Pipeline executa
 ↓
 Event Log recebe novos eventos
 ↓
-Views passam automaticamente a mostrar os novos dados
+Views refletem automaticamente os novos dados
+```
 
-O SQL só precisa ser executado novamente caso a definição das views seja alterada.
+---
 
-### 10. Consultar histórico das execuções
+# 18. Validar monitoramento e qualidade
 
-Após criar as views:
+## Histórico de execuções
 
 ```sql
 SELECT *
@@ -451,7 +766,7 @@ FROM hackernews.hacker_news.pipeline_runs
 ORDER BY started_at DESC;
 ```
 
-Essa view permite acompanhar informações como:
+A view permite acompanhar informações como:
 
 - início da execução;
 - fim da execução;
@@ -460,9 +775,8 @@ Essa view permite acompanhar informações como:
 - registros enviados para Quarentena;
 - total processado;
 - percentual de registros válidos.
-### 11. Consultar regras de qualidade
 
-Execute:
+## Regras de qualidade
 
 ```sql
 SELECT *
@@ -470,238 +784,1034 @@ FROM hackernews.hacker_news.quality_expectations
 ORDER BY processed_at DESC, expectation;
 ```
 
-Essa view permite acompanhar cada regra de qualidade e quantos registros:
+Essa view permite acompanhar quantos registros:
 
-- passaram;
+- passaram em cada regra;
 - falharam;
-- percentual de sucesso.
-### 12. Criar a orquestração
+- foram processados;
+- atingiram determinado percentual de sucesso.
 
-Após validar Landing e Landing → Bronze separadamente, crie um Lakeflow Job.
+---
+
+# 19. Resultado esperado da configuração automática
+
+Ao final da Parte 1, a arquitetura deve estar aproximadamente assim:
+
+```text
+GitHub
+  │
+  │ main
+  ▼
+Databricks
+  │
+  ├── Catalog: hackernews
+  │     └── Schema: hacker_news
+  │           └── Volume: data
+  │
+  ├── SQL Warehouse
+  │     └── Hacker News SQL Warehouse
+  │
+  ├── Job: Hacker News Pipeline
+  │     │
+  │     ├── landing
+  │     │
+  │     └── medallion_pipeline
+  │
+  ├── Pipeline: Hacker News - Medallion Pipeline
+  │     │
+  │     ├── Landing → Bronze
+  │     ├── Bronze → Silver
+  │     └── Silver → Gold
+  │
+  └── App: hackernews
+        │
+        └── SQL Warehouse
+```
+
+Se todos esses componentes existirem e o Job executar corretamente, **não é necessário realizar a Parte 2**.
+
+---
+
+# PARTE 2 — CONFIGURAÇÃO MANUAL
+
+Esta parte deve ser utilizada caso:
+
+- o `databricks.yml` não possa ser executado;
+- o Bundle apresente erro;
+- o workspace não suporte algum recurso utilizado pelo Bundle;
+- algum recurso não tenha sido criado corretamente.
+
+> Se o Bundle criou apenas parte dos recursos, não crie objetos duplicados. Primeiro verifique o que já existe e configure manualmente somente os recursos ausentes.
+
+---
+
+# 20. Conectar o repositório manualmente
 
 Acesse:
 
-`Jobs & Pipelines → New → Job`
+```text
+Workspace
+→ Create
+→ Git folder
+```
 
-Nome sugerido:
+Utilize:
 
-`Hacker News Pipeline`
+```text
+Repository:
+https://github.com/Andre2217/ProjetoFinalEngDados
 
-### Task 1 — Landing
+Branch:
+main
+```
 
-Nome:
+Confirme que todos os notebooks estão disponíveis.
 
-landing
+---
 
-Tipo:
+# 21. Criar Unity Catalog manualmente
 
-Notebook
+Abra:
 
-Arquivo:
+```text
+notebooks/00_setup.sql
+```
 
+Execute:
+
+```sql
+CREATE CATALOG IF NOT EXISTS hackernews;
+
+CREATE SCHEMA IF NOT EXISTS hackernews.hacker_news;
+
+CREATE VOLUME IF NOT EXISTS hackernews.hacker_news.data;
+```
+
+Caso seja necessário reproduzir também as permissões utilizadas pelo Bundle:
+
+```sql
+GRANT ALL PRIVILEGES
+ON CATALOG hackernews
+TO `account users`;
+
+GRANT ALL PRIVILEGES
+ON SCHEMA hackernews.hacker_news
+TO `account users`;
+
+GRANT ALL PRIVILEGES
+ON VOLUME hackernews.hacker_news.data
+TO `account users`;
+```
+
+Depois acesse:
+
+```text
+Catalog Explorer
+→ hackernews
+→ hacker_news
+→ Volumes
+→ data
+```
+
+---
+
+# 22. Criar SQL Warehouse manualmente
+
+Acesse:
+
+```text
+SQL
+→ SQL Warehouses
+→ Create SQL warehouse
+```
+
+Utilize:
+
+```text
+Name:
+Hacker News SQL Warehouse
+```
+
+Configuração recomendada:
+
+```text
+Compute: Serverless
+Size: 2X-Small
+Min clusters: 1
+Max clusters: 1
+Auto Stop: 10 minutos
+```
+
+Se essas opções não estiverem disponíveis no workspace, utilize um SQL Warehouse Serverless já existente.
+
+Em ambientes como Free Edition, pode existir:
+
+```text
+Serverless Starter Warehouse
+```
+
+Esse Warehouse também pode ser utilizado.
+
+---
+
+# 23. Testar a Landing manualmente
+
+Abra:
+
+```text
 notebooks/01_landing.py
+```
 
-Essa task consulta a API e cria um novo snapshot NDJSON na Landing.
-
-Task 2 — Landing para Bronze
-
-Nome:
-
-landing_to_bronze
-
-Tipo:
-
-Pipeline
-
-Pipeline:
-
-Hacker News - Landing to Bronze
-
-Dependência:
-
-landing
-
-Ou seja:
-
-landing
-↓
-landing_to_bronze
-
-A segunda task somente deve executar após o sucesso da primeira.
-
-### 13. Testar o Job
-
-Antes de configurar o agendamento automático, execute o Job manualmente.
+Execute o notebook.
 
 O fluxo esperado é:
 
-Task 1
+```text
 Hacker News API
 ↓
-novo arquivo NDJSON
-
-Task 2
-novo arquivo da Landing
+Top Stories
 ↓
-Auto Loader
+Detalhes das notícias
 ↓
-validação
+NDJSON
 ↓
-Bronze ou Quarentena
+Unity Catalog Volume
+```
 
-Após a execução, consulte:
+Confirme os arquivos em:
 
+```text
+/Volumes/hackernews/hacker_news/data/landing
+```
+
+Estrutura esperada:
+
+```text
+landing/AAAA/MM/DD/arquivo.ndjson
+```
+
+---
+
+# 24. Criar o ETL Pipeline manualmente
+
+Acesse:
+
+```text
+Jobs & Pipelines
+→ New
+→ ETL Pipeline
+```
+
+Configure:
+
+```text
+Name:
+Hacker News - Medallion Pipeline
+```
+
+Destino padrão:
+
+```text
+Catalog:
+hackernews
+
+Schema:
+hacker_news
+```
+
+Utilize compute:
+
+```text
+Serverless
+```
+
+quando disponível.
+
+---
+
+# 25. Adicionar os códigos do Pipeline
+
+Inclua os três arquivos no mesmo ETL Pipeline:
+
+```text
+notebooks/02_landing_to_bronze.py
+
+notebooks/04_bronze_to_silver.py
+
+notebooks/05_silver_to_gold.py
+```
+
+Não devem ser criados três Pipelines diferentes.
+
+Todos fazem parte de:
+
+```text
+Hacker News - Medallion Pipeline
+```
+
+Isso permite que o Lakeflow identifique as dependências entre:
+
+```text
+Bronze
+↓
+Silver
+↓
+Gold
+```
+
+Se o Databricks criar arquivos de exemplo automaticamente, remova esses arquivos das fontes do Pipeline.
+
+---
+
+# 26. Configurar o Event Log manualmente
+
+Abra as configurações do Pipeline.
+
+Configure a publicação do Event Log em:
+
+```text
+Catalog:
+hackernews
+
+Schema:
+hacker_news
+
+Name:
+pipeline_event_log
+```
+
+O resultado será:
+
+```text
+hackernews.hacker_news.pipeline_event_log
+```
+
+---
+
+# 27. Validar o Pipeline manualmente
+
+Antes da primeira execução, utilize:
+
+```text
+Dry run
+```
+
+O Dry Run verifica a definição do Pipeline sem realizar a atualização completa dos datasets.
+
+Se não houver erros:
+
+```text
+Run pipeline
+```
+
+Após a execução devem existir:
+
+```text
 bronze_stories
 
 quarantine_stories
 
-pipeline_runs
+silver_story_snapshots
 
-### 14. Agendamento
+gold_story_timeline
 
-O agendamento definitivo será configurado após a pipeline completa estar estabilizada.
+gold_story_summary
 
-Planejamento atual:
+gold_domain_stats
 
-Execução a cada 30 minutos.
+gold_trend_index
 
-Também será configurado:
+pipeline_event_log
+```
 
-retry em caso de falha;
-dependências entre tasks;
-registro de status;
-monitoramento das execuções.
+dentro de:
 
-Por enquanto, durante o desenvolvimento, recomenda-se executar manualmente.
+```text
+hackernews.hacker_news
+```
 
-### 15. Como o processamento incremental funciona
+---
 
-A Landing mantém todos os snapshots.
+# 28. Criar as views de qualidade manualmente
+
+Após o primeiro Pipeline bem-sucedido, execute:
+
+```text
+notebooks/03_quality_report.sql
+```
+
+Confirme a criação de:
+
+```text
+hackernews.hacker_news.pipeline_runs
+
+hackernews.hacker_news.quality_expectations
+```
+
+---
+
+# 29. Criar o Lakeflow Job manualmente
+
+Acesse:
+
+```text
+Jobs & Pipelines
+→ New
+→ Job
+```
+
+Nome:
+
+```text
+Hacker News Pipeline
+```
+
+---
+
+## 29.1. Configurar Git no Job
+
+Configure o Job para utilizar:
+
+```text
+Git provider:
+GitHub
+
+Repository:
+https://github.com/Andre2217/ProjetoFinalEngDados
+
+Branch:
+main
+```
+
+---
+
+## 29.2. Criar Task 1 — Landing
+
+Configure:
+
+```text
+Task name:
+landing
+
+Type:
+Notebook
+
+Source:
+Git provider
+
+Path:
+notebooks/01_landing
+
+Compute:
+Serverless
+```
+
+Essa task será responsável por gerar um novo snapshot.
+
+---
+
+## 29.3. Criar Task 2 — Medallion Pipeline
+
+Configure:
+
+```text
+Task name:
+medallion_pipeline
+
+Type:
+Pipeline
+
+Pipeline:
+Hacker News - Medallion Pipeline
+```
+
+Em:
+
+```text
+Depends on
+```
+
+selecione:
+
+```text
+landing
+```
+
+Em:
+
+```text
+Run if dependencies
+```
+
+utilize:
+
+```text
+All succeeded
+```
+
+O fluxo final deve aparecer como:
+
+```text
+landing
+   │
+   ▼
+medallion_pipeline
+```
+
+---
+
+# 30. Configurar retries
+
+Para aumentar a tolerância a falhas temporárias, recomenda-se configurar nas tasks:
+
+```text
+Maximum retries:
+2
+
+Retry interval:
+2 minutos
+```
+
+O objetivo é permitir nova tentativa em casos como:
+
+- falha temporária da API;
+- indisponibilidade momentânea do serviço;
+- erro transitório do Databricks.
+
+---
+
+# 31. Configurar o agendamento manualmente
+
+Dentro de:
+
+```text
+Hacker News Pipeline
+```
+
+acesse:
+
+```text
+Schedules & Triggers
+→ Add trigger
+```
+
+Selecione:
+
+```text
+Scheduled
+```
+
+Configure uma execução:
+
+```text
+a cada 30 minutos
+```
+
+Utilize timezone:
+
+```text
+America/Fortaleza
+```
+
+Ative o agendamento.
+
+---
+
+# 32. Testar o Job manualmente
+
+Antes de depender do Schedule, clique em:
+
+```text
+Run now
+```
+
+O fluxo esperado é:
+
+```text
+landing
+↓
+novo NDJSON
+↓
+medallion_pipeline
+↓
+Bronze
+↓
+Silver
+↓
+Gold
+```
+
+As duas tasks devem terminar como:
+
+```text
+Succeeded
+```
+
+Depois valide as tabelas utilizando os procedimentos das seções 12 a 18 deste documento.
+
+---
+
+# 33. Criar o Databricks App manualmente
+
+Acesse:
+
+```text
+Apps
+→ Create app
+→ Create custom app
+```
+
+Nome:
+
+```text
+hackernews
+```
+
+Configure o Git:
+
+```text
+Repository:
+https://github.com/Andre2217/ProjetoFinalEngDados
+
+Provider:
+GitHub
+
+Reference:
+main
+```
+
+O repositório precisa possuir os arquivos necessários para execução da aplicação Streamlit.
+
+---
+
+# 34. Associar o SQL Warehouse ao App
+
+Dentro das configurações do App:
+
+```text
+App resources
+→ Add resource
+→ SQL Warehouse
+```
+
+Selecione:
+
+```text
+Hacker News SQL Warehouse
+```
+
+Permissão:
+
+```text
+Can use
+```
+
+Utilize uma chave de recurso compatível com a configuração da aplicação, por exemplo:
+
+```text
+sql_warehouse
+```
+
+O App utiliza esse Warehouse para consultar as tabelas Gold.
+
+---
+
+# 35. Permissões do App no Unity Catalog
+
+O Databricks App executa utilizando uma identidade própria.
+
+Essa identidade precisa conseguir consultar:
+
+```text
+hackernews.hacker_news
+```
+
+No Catalog Explorer, abra as permissões do Catalog/Schema e conceda à identidade do App pelo menos:
+
+```text
+USE CATALOG
+USE SCHEMA
+SELECT
+```
+
+sobre os dados necessários ao dashboard.
+
+Para este projeto, o principal consumo do App ocorre nas tabelas Gold.
+
+---
+
+# 36. Implantar o App
+
+Abra:
+
+```text
+Apps
+→ hackernews
+```
+
+Clique em:
+
+```text
+Deploy
+```
+
+Selecione a origem:
+
+```text
+Git
+```
+
+e a referência:
+
+```text
+main
+```
+
+Após o deploy, aguarde o status:
+
+```text
+Running
+```
+
+Abra o endereço disponibilizado pelo Databricks e confirme que o dashboard consegue consultar os dados.
+
+Caso a aplicação apresente erro:
+
+```text
+Apps
+→ hackernews
+→ Logs
+```
+
+utilize os logs para identificar o problema.
+
+---
+
+# 37. Processamento incremental
+
+A Landing mantém todos os snapshots gerados.
 
 Exemplo:
 
+```text
 landing/
+├── arquivo_1000.ndjson
+├── arquivo_1030.ndjson
+├── arquivo_1100.ndjson
+└── arquivo_1130.ndjson
+```
 
-arquivo_1000.ndjson
-arquivo_1030.ndjson
-arquivo_1100.ndjson
+Na primeira execução do Pipeline:
 
-Na primeira execução do ETL Pipeline:
+```text
+arquivo_1000 → processado
+arquivo_1030 → processado
+arquivo_1100 → processado
+```
 
-arquivo_1000 → processado;
-arquivo_1030 → processado;
-arquivo_1100 → processado.
+Posteriormente:
 
-Posteriormente é criado:
+```text
+arquivo_1130.ndjson
+```
 
-arquivo_1130.ndjson.
+é criado.
 
-Na próxima execução:
+Na execução seguinte:
 
-arquivo_1000 → ignorado;
-arquivo_1030 → ignorado;
-arquivo_1100 → ignorado;
-arquivo_1130 → processado.
+```text
+arquivo_1000 → já processado
+arquivo_1030 → já processado
+arquivo_1100 → já processado
+arquivo_1130 → processado
+```
 
 Esse comportamento é controlado pelo Auto Loader e pelo estado do Lakeflow Pipeline.
 
-Não é necessário apagar nem mover os arquivos antigos da Landing.
+Não é necessário apagar nem mover snapshots antigos.
 
-### 16. Atualizar código pelo Git
+---
+
+# 38. Atualização do código pelo Git
 
 Antes de começar a trabalhar:
+
 ```bash
 git pull
 ```
-Após realizar alterações:
+
+Depois das alterações:
+
 ```bash
 git status
 git add .
 git commit -m "descricao da alteracao"
 git push
 ```
-Os objetos criados diretamente no workspace, como Jobs e ETL Pipelines, ainda não são versionados automaticamente pelo Git.
 
-Nesta fase do projeto, a configuração necessária para recriá-los está documentada neste arquivo.
+O código e a definição da infraestrutura devem permanecer versionados no GitHub.
 
-Posteriormente poderá ser utilizado Databricks Declarative Automation Bundles para versionar também a infraestrutura e a configuração dos Jobs e Pipelines.
+O `databricks.yml` permite que a configuração dos principais recursos Databricks também seja mantida como código.
 
-### 17. Estado atual da execução
+---
 
-Atualmente o fluxo reproduzível é:
+# 39. Procedimento após alterações no projeto
 
-00_setup.sql
+Quando apenas código Python ou SQL for alterado:
 
+```text
+git push
 ↓
-
-01_landing.py
-
+atualizar o Git Folder
 ↓
+executar novamente o Job/Pipeline
+```
 
-Hacker News - Landing to Bronze
+Quando o arquivo:
 
-utilizando:
+```text
+databricks.yml
+```
 
-02_landing_to_bronze.py
+for alterado, execute novamente:
 
+```text
+Deployments
+→ Deploy
+```
+
+ou:
+
+```bash
+databricks bundle validate -t default
+databricks bundle deploy -t default
+```
+
+O Bundle aplicará as alterações necessárias aos recursos gerenciados.
+
+---
+
+# 40. O que fazer caso o Bundle falhe parcialmente
+
+Se o deploy do `databricks.yml` apresentar erro:
+
+1. leia o erro apresentado em `Project output`;
+2. identifique qual recurso falhou;
+3. verifique quais recursos já foram criados;
+4. não recrie objetos que já existam;
+5. utilize a Parte 2 somente para os recursos ausentes ou incorretos.
+
+Exemplo:
+
+```text
+Catalog       → criado
+Schema        → criado
+Volume        → criado
+Warehouse     → criado
+Pipeline      → criado
+Job           → criado
+App           → erro
+```
+
+Nesse caso, não é necessário executar toda a configuração manual.
+
+Utilize apenas:
+
+```text
+Parte 2
+→ Criar/configurar Databricks App manualmente
+```
+
+O mesmo princípio vale para qualquer outro recurso.
+
+> Evite utilizar `databricks bundle destroy` em ambientes que já possuam dados importantes sem verificar exatamente quais recursos serão removidos.
+
+---
+
+# 41. Checklist de validação final
+
+Antes de considerar o ambiente reproduzido corretamente, confirme:
+
+```text
+[ ] Repositório Git conectado
+
+[ ] Catalog hackernews criado
+
+[ ] Schema hacker_news criado
+
+[ ] Volume data criado
+
+[ ] Landing gravando arquivos NDJSON
+
+[ ] SQL Warehouse disponível
+
+[ ] Hacker News - Medallion Pipeline criado
+
+[ ] 02_landing_to_bronze.py incluído
+
+[ ] 04_bronze_to_silver.py incluído
+
+[ ] 05_silver_to_gold.py incluído
+
+[ ] pipeline_event_log criado
+
+[ ] bronze_stories criada
+
+[ ] quarantine_stories criada
+
+[ ] silver_story_snapshots criada
+
+[ ] gold_story_timeline criada
+
+[ ] gold_story_summary criada
+
+[ ] gold_domain_stats criada
+
+[ ] gold_trend_index criada
+
+[ ] pipeline_runs criada
+
+[ ] quality_expectations criada
+
+[ ] Hacker News Pipeline criado
+
+[ ] Task landing criada
+
+[ ] Task medallion_pipeline criada
+
+[ ] Dependência landing → medallion_pipeline configurada
+
+[ ] Schedule de 30 minutos configurado
+
+[ ] Job executado com sucesso
+
+[ ] Databricks App hackernews criado
+
+[ ] SQL Warehouse associado ao App
+
+[ ] App consegue acessar Unity Catalog
+
+[ ] Dashboard abre e apresenta os dados
+```
+
+---
+
+# 42. Fluxo final do projeto
+
+A arquitetura completa é:
+
+```text
+                    GitHub
+                       │
+                       ▼
+                databricks.yml
+                       │
+        ┌──────────────┼───────────────┐
+        │              │               │
+        ▼              ▼               ▼
+ Unity Catalog      Lakeflow         Databricks
+                     Job                App
+        │              │               │
+        │              ▼               │
+        │           landing             │
+        │              │               │
+        │              ▼               │
+        │       Medallion Pipeline      │
+        │              │               │
+        │              ▼               │
+        │           Bronze              │
+        │              │               │
+        │              ▼               │
+        │           Silver              │
+        │              │               │
+        │              ▼               │
+        │            Gold ──────────────┤
+        │                              │
+        │                       SQL Warehouse
+        │                              │
+        └──────────────────────────────┘
+                                       │
+                                       ▼
+                                   Dashboard
+```
+
+O fluxo operacional normal é:
+
+```text
+Schedule a cada 30 minutos
 ↓
-
-Bronze / Quarentena / Event Log
-
+Hacker News Pipeline
 ↓
-
-03_quality_report.sql
-
-↓
-
-Views de monitoramento
-
-↓
-
-Lakeflow Job:
-
 landing
 ↓
-landing_to_bronze
-
-### 18. Próximas etapas
-
-Ainda serão adicionadas ao projeto:
-
+novo snapshot NDJSON
+↓
+medallion_pipeline
+↓
+Bronze
+↓
 Silver
 ↓
 Gold
 ↓
-Streamlit
+Dashboard atualizado
+```
 
-Quando essas etapas forem implementadas, este RUNBOOK será atualizado com:
+---
 
-- novas tabelas;
-- novas tasks do Job;
-- novos passos de configuração;
-- novos testes de validação;
-- instruções para execução da solução completa.
-### Resumo da primeira configuração
+# Resumo para um novo ambiente
 
-Em um workspace novo, a ordem é:
+## Método recomendado
 
- Conectar o repositório GitHub ao Databricks.
-Executar 00_setup.sql.
-Executar 01_landing.py.
-Criar o ETL Pipeline apontando para 02_landing_to_bronze.py.
-Configurar Catalog hackernews e Schema hacker_news.
-Publicar pipeline_event_log.
-Fazer Dry Run.
-Executar o ETL Pipeline.
-Incluir 04_bronze_to_silver.py no mesmo ETL Pipeline.
-Executar o ETL Pipeline novamente e validar silver_story_snapshots.
-Incluir 05_silver_to_gold.py no mesmo ETL Pipeline.
-Executar o ETL Pipeline novamente e validar as tabelas da Gold.
-Executar 03_quality_report.sql uma única vez.
-Criar o Lakeflow Job.
-Configurar a task landing.
-Configurar a task landing_to_bronze.
-Executar o Job manualmente.
-Validar Bronze, Quarentena e relatórios.
+```text
+1. Conectar o GitHub ao Databricks
+2. Abrir databricks.yml
+3. Abrir Deployments
+4. Selecionar target default
+5. Clicar em Deploy
+6. Validar Catalog / Schema / Volume
+7. Validar SQL Warehouse
+8. Validar Pipeline
+9. Validar Job
+10. Validar App
+11. Executar Hacker News Pipeline manualmente uma vez
+12. Executar 03_quality_report.sql uma única vez
+13. Validar Bronze, Silver e Gold
+14. Abrir o dashboard
+```
 
-Após essa configuração inicial, a execução normal acontece através do Lakeflow Job.
+## Caso o Bundle não funcione
+
+```text
+1. Conectar o GitHub
+2. Executar 00_setup.sql
+3. Criar SQL Warehouse
+4. Testar 01_landing.py
+5. Criar Hacker News - Medallion Pipeline
+6. Adicionar 02_landing_to_bronze.py
+7. Adicionar 04_bronze_to_silver.py
+8. Adicionar 05_silver_to_gold.py
+9. Configurar pipeline_event_log
+10. Executar Dry Run
+11. Executar Pipeline
+12. Executar 03_quality_report.sql
+13. Criar Hacker News Pipeline
+14. Criar task landing
+15. Criar task medallion_pipeline
+16. Configurar dependência entre as tasks
+17. Configurar Schedule de 30 minutos
+18. Criar Databricks App hackernews
+19. Associar SQL Warehouse
+20. Configurar permissões
+21. Deploy do App
+22. Executar o Job
+23. Validar todo o fluxo
+```
+
+Após a configuração inicial, a operação normal acontece automaticamente através do:
+
+```text
+Hacker News Pipeline
+```
+
+executado a cada 30 minutos.
