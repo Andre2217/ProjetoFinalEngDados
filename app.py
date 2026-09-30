@@ -12,9 +12,19 @@ CATALOG_SCHEMA = "hackernews.hacker_news"
 PRIMARY = "#FF6600"   # laranja Hacker News
 ACCENT = "#2563EB"    # azul para séries secundárias
 NEUTRAL = "#94A3B8"   # cinza para elementos de apoio
-DARK = "#334155"
-
 st.set_page_config(page_title="Hacker News | Analytics", layout="wide", page_icon="📈")
+
+
+def _is_dark() -> bool:
+    try:
+        return st.context.theme.type == "dark"
+    except Exception:
+        return True
+
+
+DARK_THEME = _is_dark()
+TEXT = "#E2E8F0" if DARK_THEME else "#334155"   # rótulos escritos sobre os gráficos
+BG = "#0E1117" if DARK_THEME else "#FFFFFF"     # contorno dos pontos, igual ao fundo
 st.title("Hacker News | Analytics")
 st.caption("Indicadores calculados a partir das tabelas Gold do Databricks")
 
@@ -153,8 +163,8 @@ with overview:
     b.metric("Maior pontuação", a_score)
     in_snapshot = int(summary["is_in_latest_snapshot"].fillna(False).astype(bool).sum()) if not summary.empty else 0
     c.metric("No snapshot atual", fmt(in_snapshot))
-    avg_hours = summary["hours_in_top_n"].mean() if not summary.empty else None
-    d.metric("Média de horas no top", "—" if avg_hours is None or pd.isna(avg_hours) else f"{avg_hours:.1f} h")
+    avg_comments = summary["peak_comments"].mean() if not summary.empty else None
+    d.metric("Média de comentários", "—" if avg_comments is None or pd.isna(avg_comments) else f"{avg_comments:.0f}")
 
     if summary.empty:
         st.info("Nenhuma história disponível para o filtro escolhido.")
@@ -169,7 +179,7 @@ with overview:
             s["title_short"] = s["title"].map(short)
             scatter = (
                 alt.Chart(s, title="Pontuação × comentários")
-                .mark_circle(opacity=0.7, stroke="white", strokeWidth=0.6)
+                .mark_circle(opacity=0.7, stroke=BG, strokeWidth=0.6)
                 .encode(
                     x=alt.X("peak_score:Q", title="Pontuação máxima", scale=alt.Scale(type="symlog")),
                     y=alt.Y("peak_comments:Q", title="Comentários (pico)", scale=alt.Scale(type="symlog")),
@@ -207,7 +217,7 @@ with overview:
                 ],
             )
             text = bars.mark_text(align="left", dx=5, fontWeight=600).encode(
-                text=alt.Text("peak_score:Q", format=","), color=alt.value(DARK)
+                text=alt.Text("peak_score:Q", format=","), color=alt.value(TEXT)
             )
             show(alt.layer(bars, text), 420)
 
@@ -243,17 +253,15 @@ with trending:
         st.caption(f"Snapshot: {trends['snapshot_at'].iloc[0]}")
         t = trends.dropna(subset=["trend_index"]).nsmallest(15, "trend_rank").copy()
         t["label"] = t.apply(lambda r: f"{as_int(r['trend_rank']) or '–'}. {short(r['title'], 55)}", axis=1)
-        mom = t["rank_momentum"].abs().max()
-        mom = 1 if pd.isna(mom) or mom == 0 else float(mom)
         trend_bars = alt.Chart(t, title="Índice de tendência — top 15").mark_bar(
             cornerRadiusEnd=4, height=18
         ).encode(
             x=alt.X("trend_index:Q", title="Índice de tendência"),
             y=alt.Y("label:N", title=None, sort=alt.EncodingSortField("trend_rank", order="ascending")),
             color=alt.Color(
-                "rank_momentum:Q",
-                title="Momentum de posição",
-                scale=alt.Scale(scheme="redyellowgreen", domain=[-mom, mom], domainMid=0),
+                "score_velocity:Q",
+                title="Velocidade de pontos",
+                scale=alt.Scale(scheme="oranges"),
                 legend=alt.Legend(gradientLength=220, direction="horizontal"),
             ),
             tooltip=[
@@ -266,8 +274,11 @@ with trending:
                 alt.Tooltip("comments:Q", title="Comentários", format=","),
             ],
         )
-        show(trend_bars, max(320, 30 * len(t)))
-        st.caption("Verde: a história está subindo no ranking; vermelho: está caindo.")
+        trend_text = trend_bars.mark_text(align="left", dx=5, fontWeight=600).encode(
+            text=alt.Text("trend_index:Q", format=".1f"), color=alt.value(TEXT)
+        )
+        show(alt.layer(trend_bars, trend_text), max(320, 30 * len(t)))
+        st.caption("Quanto mais escura a barra, mais rápido a história está ganhando pontos.")
         st.dataframe(
             trends,
             use_container_width=True,
@@ -314,7 +325,7 @@ with domain_tab:
                 tooltip=dom_tooltip,
             )
             dom_text = dom_bars.mark_text(align="left", dx=5, fontWeight=600).encode(
-                text="stories_count:Q", color=alt.value(DARK)
+                text="stories_count:Q", color=alt.value(TEXT)
             )
             show(alt.layer(dom_bars, dom_text), max(320, 30 * len(dd)))
 
@@ -322,7 +333,7 @@ with domain_tab:
             bubble = (
                 alt.Chart(domains.dropna(subset=["domain", "stories_count", "avg_peak_score"]),
                           title="Volume × qualidade")
-                .mark_circle(color=ACCENT, opacity=0.6, stroke="white", strokeWidth=0.6)
+                .mark_circle(color=ACCENT, opacity=0.6, stroke=BG, strokeWidth=0.6)
                 .encode(
                     x=alt.X("stories_count:Q", title="Histórias", scale=alt.Scale(type="symlog")),
                     y=alt.Y("avg_peak_score:Q", title="Pontuação média"),
@@ -354,8 +365,25 @@ with evolution:
     if summary.empty:
         st.info("Nenhuma história disponível para o filtro escolhido.")
     else:
-        options = summary.drop_duplicates("story_id").set_index("story_id")["title"].fillna("Sem título").to_dict()
-        story_id = st.selectbox("História", list(options), format_func=lambda sid: f"{options[sid]} ({sid})")
+        titles = summary.drop_duplicates("story_id").set_index("story_id")["title"].fillna("Sem título").to_dict()
+        try:
+            counts = query(f"""
+                SELECT CAST(story_id AS STRING) AS story_id, COUNT(*) AS coletas
+                FROM {CATALOG_SCHEMA}.gold_story_timeline
+                GROUP BY story_id
+            """, warehouse_path)
+            n_coletas = dict(zip(counts["story_id"].astype(str), pd.to_numeric(counts["coletas"]).astype(int)))
+        except Exception:
+            n_coletas = {}
+        # Histórias com mais coletas primeiro: são as que têm uma evolução para mostrar.
+        ordered = sorted(titles, key=lambda sid: -n_coletas.get(str(sid), 0))
+
+        def label(sid):
+            n = n_coletas.get(str(sid))
+            extra = f" · {n} coleta{'s' if n != 1 else ''}" if n is not None else ""
+            return f"{titles[sid]} ({sid}){extra}"
+
+        story_id = st.selectbox("História", ordered, format_func=label)
         # story_id vem somente das linhas retornadas pela consulta; aspas são duplicadas para SQL.
         escaped_id = str(story_id).replace("'", "''")
         try:
@@ -390,56 +418,61 @@ with evolution:
                       delta=as_int(last["rank"] - first["rank"]), delta_color="inverse")
             m4.metric("Melhor posição", fmt(as_int(timeline["rank"].min())))
 
-            x_axis = alt.X("collected_at:T", title=None, axis=alt.Axis(format="%d/%m %H:%M", labelAngle=0))
-            tooltip = [
-                alt.Tooltip("collected_at:T", title="Coleta", format="%d/%m/%Y %H:%M"),
-                alt.Tooltip("rank:Q", title="Posição"),
-                alt.Tooltip("score:Q", title="Pontuação", format=","),
-                alt.Tooltip("score_delta:Q", title="Δ pontuação", format="+,"),
-                alt.Tooltip("comments:Q", title="Comentários", format=","),
-                alt.Tooltip("comments_delta:Q", title="Δ comentários", format="+,"),
-            ]
-            hover = alt.selection_point(fields=["collected_at"], nearest=True, on="mouseover", empty=False)
-            base = alt.Chart(timeline).encode(x=x_axis)
+            if len(timeline) < 2:
+                st.info("Esta história tem só uma coleta, então ainda não há evolução para desenhar. "
+                        "As histórias com mais coletas aparecem primeiro no seletor.")
+            else:
+                x_axis = alt.X("collected_at:T", title=None, axis=alt.Axis(format="%d/%m %H:%M", labelAngle=0))
+                tooltip = [
+                    alt.Tooltip("collected_at:T", title="Coleta", format="%d/%m/%Y %H:%M"),
+                    alt.Tooltip("rank:Q", title="Posição"),
+                    alt.Tooltip("score:Q", title="Pontuação", format=","),
+                    alt.Tooltip("score_delta:Q", title="Δ pontuação", format="+,"),
+                    alt.Tooltip("comments:Q", title="Comentários", format=","),
+                    alt.Tooltip("comments_delta:Q", title="Δ comentários", format="+,"),
+                ]
+                hover = alt.selection_point(fields=["collected_at"], nearest=True, on="mouseover", empty=False)
+                base = alt.Chart(timeline).encode(x=x_axis)
 
-            score_line = base.mark_line(color=PRIMARY, strokeWidth=2.5, interpolate="monotone").encode(
-                y=alt.Y("score:Q", title="Pontuação", axis=alt.Axis(titleColor=PRIMARY))
-            )
-            score_area = base.mark_area(color=PRIMARY, opacity=0.08, interpolate="monotone").encode(
-                y=alt.Y("score:Q")
-            )
-            comments_line = base.mark_line(color=ACCENT, strokeWidth=2.5, strokeDash=[6, 3],
-                                           interpolate="monotone").encode(
-                y=alt.Y("comments:Q", title="Comentários", axis=alt.Axis(titleColor=ACCENT, orient="right"))
-            )
-            rule = base.mark_rule(color=NEUTRAL, strokeWidth=1).encode(
-                opacity=alt.condition(hover, alt.value(0.9), alt.value(0)), tooltip=tooltip
-            ).add_params(hover)
+                score_line = base.mark_line(color=PRIMARY, strokeWidth=2.5, interpolate="monotone",
+                                            point=alt.OverlayMarkDef(color=PRIMARY, size=40, filled=True)).encode(
+                    y=alt.Y("score:Q", title="Pontuação", axis=alt.Axis(titleColor=PRIMARY))
+                )
+                score_area = base.mark_area(color=PRIMARY, opacity=0.08, interpolate="monotone").encode(
+                    y=alt.Y("score:Q")
+                )
+                comments_line = base.mark_line(color=ACCENT, strokeWidth=2.5, strokeDash=[6, 3], interpolate="monotone",
+                                               point=alt.OverlayMarkDef(color=ACCENT, size=40, filled=True)).encode(
+                    y=alt.Y("comments:Q", title="Comentários", axis=alt.Axis(titleColor=ACCENT, orient="right"))
+                )
+                rule = base.mark_rule(color=NEUTRAL, strokeWidth=1).encode(
+                    opacity=alt.condition(hover, alt.value(0.9), alt.value(0)), tooltip=tooltip
+                ).add_params(hover)
 
-            engagement = alt.layer(
-                alt.layer(score_area, score_line),
-                comments_line,
-                rule,
-            ).resolve_scale(y="independent").properties(
-                title=alt.TitleParams("Pontuação e comentários",
-                                      subtitle="Laranja: pontuação (eixo esq.) · Azul tracejado: comentários (eixo dir.)")
-            )
-            show(engagement, 360)
+                engagement = alt.layer(
+                    alt.layer(score_area, score_line),
+                    comments_line,
+                    rule,
+                ).resolve_scale(y="independent").properties(
+                    title=alt.TitleParams("Pontuação e comentários",
+                                          subtitle="Laranja: pontuação (eixo esq.) · Azul tracejado: comentários (eixo dir.)")
+                )
+                show(engagement, 360)
 
-            rank_line = base.mark_line(color=DARK, strokeWidth=2, interpolate="step-after").encode(
-                y=alt.Y("rank:Q", title="Posição", scale=alt.Scale(reverse=True, zero=False, nice=False))
-            )
-            rank_points = base.mark_circle(size=45, opacity=0.9).encode(
-                y="rank:Q",
-                color=alt.Color("faixa:N", title=None,
-                                scale=alt.Scale(domain=["No top N", "Fora do top N"],
-                                                range=[PRIMARY, NEUTRAL])),
-                tooltip=tooltip,
-            )
-            ranking = alt.layer(rank_line, rank_points).properties(
-                title=alt.TitleParams("Posição no ranking", subtitle="Quanto mais alto no gráfico, melhor a posição")
-            )
-            show(ranking, 300)
+                rank_line = base.mark_line(color=TEXT, strokeWidth=2, interpolate="step-after").encode(
+                    y=alt.Y("rank:Q", title="Posição", scale=alt.Scale(reverse=True, zero=False, nice=False))
+                )
+                rank_points = base.mark_circle(size=45, opacity=0.9).encode(
+                    y="rank:Q",
+                    color=alt.Color("faixa:N", title=None,
+                                    scale=alt.Scale(domain=["No top N", "Fora do top N"],
+                                                    range=[PRIMARY, NEUTRAL])),
+                    tooltip=tooltip,
+                )
+                ranking = alt.layer(rank_line, rank_points).properties(
+                    title=alt.TitleParams("Posição no ranking", subtitle="Quanto mais alto no gráfico, melhor a posição")
+                )
+                show(ranking, 300)
 
             st.dataframe(
                 timeline.drop(columns=["faixa"]),
