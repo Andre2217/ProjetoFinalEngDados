@@ -1,5 +1,11 @@
 # 📈 Pipeline de Monitoramento e Detecção de Tendências Tecnológicas no Hacker News
 
+### Alunos:
+- André Araújo Parente --- 2519641
+- José Wendemberg Henrique Lima --- 2518804
+- Osiris de Castro Oliveira Neto --- 2518598
+
+
 Projeto desenvolvido para a disciplina de **Projetos** da Pós-Graduação em **Engenharia de Dados da UNIFOR**.
 
 O projeto implementa uma pipeline de Engenharia de Dados ponta a ponta para coletar periodicamente as principais histórias do Hacker News, preservar sua evolução histórica e transformar os snapshots coletados em indicadores analíticos de desempenho, relevância e tendência.
